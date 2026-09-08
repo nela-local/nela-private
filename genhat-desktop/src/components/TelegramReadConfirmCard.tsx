@@ -17,10 +17,15 @@ export default function TelegramReadConfirmCard() {
     resolveTelegramReadConfirm({ confirmed: false, reason: "user_cancelled" });
   };
 
-  const detail =
-    request.maxResults === 1
+  const detail = request.chat
+    ? `Last ${request.maxResults} messages with ${request.chat}`
+    : request.maxResults === 1
       ? "Latest chat preview"
       : `Up to ${request.maxResults} recent chats`;
+
+  const hint = request.chat
+    ? `${request.purpose}. NELA will fetch recent messages in that chat only — nothing is stored in the cloud.`
+    : `${request.purpose}. NELA will fetch chat previews only for this request — nothing is stored in the cloud.`;
 
   return (
     <div className="gmail-confirm" role="dialog" aria-label="Allow Telegram read">
@@ -38,10 +43,7 @@ export default function TelegramReadConfirmCard() {
           <X size={16} />
         </button>
       </div>
-      <p className="gmail-confirm__hint">
-        {request.purpose}. NELA will fetch chat previews only for this request
-        — nothing is stored in the cloud.
-      </p>
+      <p className="gmail-confirm__hint">{hint}</p>
       <p className="gmail-confirm__hint" style={{ marginTop: 0 }}>
         {detail}
       </p>

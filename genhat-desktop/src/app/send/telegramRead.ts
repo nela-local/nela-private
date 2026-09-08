@@ -1,5 +1,5 @@
 /**
- * Host-side telegram_read: confirm in chat, then fetch recent chats.
+ * Host-side telegram_read: confirm in chat, then fetch chats or a thread.
  */
 
 import { Api } from "../../api";
@@ -9,30 +9,42 @@ import {
 } from "../../stores/telegramReadConfirmStore";
 import type { TelegramReadResult } from "../../types";
 
-const MAX_RESULTS = 5;
+const MAX_DIALOG_LIST = 10;
+const DEFAULT_DIALOG_LIST = 5;
+const MAX_HISTORY = 20;
+const DEFAULT_HISTORY = 10;
 
 export function parseTelegramReadArgs(args: Record<string, unknown>): {
+  chat: string | null;
   maxResults: number;
   purpose: string;
 } {
+  const chatRaw = args.chat ?? args.to ?? args.name;
+  const chat =
+    typeof chatRaw === "string" && chatRaw.trim() ? chatRaw.trim() : null;
+
+  const cap = chat ? MAX_HISTORY : MAX_DIALOG_LIST;
+  const fallback = chat ? DEFAULT_HISTORY : DEFAULT_DIALOG_LIST;
   const rawMax = args.max_results ?? args.maxResults;
-  let maxResults = 1;
+  let maxResults = fallback;
   if (typeof rawMax === "number" && Number.isFinite(rawMax)) {
-    maxResults = Math.max(1, Math.min(MAX_RESULTS, Math.floor(rawMax)));
+    maxResults = Math.max(1, Math.min(cap, Math.floor(rawMax)));
   } else if (typeof rawMax === "string" && rawMax.trim()) {
     const n = Number.parseInt(rawMax, 10);
-    if (Number.isFinite(n)) maxResults = Math.max(1, Math.min(MAX_RESULTS, n));
+    if (Number.isFinite(n)) maxResults = Math.max(1, Math.min(cap, n));
   }
 
   const purposeRaw = args.purpose;
   const purpose =
     typeof purposeRaw === "string" && purposeRaw.trim()
       ? purposeRaw.trim()
-      : maxResults === 1
-        ? "Read your latest Telegram chat"
-        : `Read your ${maxResults} most recent Telegram chats`;
+      : chat
+        ? `Read recent messages with ${chat}`
+        : maxResults === 1
+          ? "Read your latest Telegram chat"
+          : `Read your ${maxResults} most recent Telegram chats`;
 
-  return { maxResults, purpose };
+  return { chat, maxResults, purpose };
 }
 
 export async function executeTelegramRead(
@@ -58,6 +70,7 @@ export async function executeTelegramRead(
     const decision = await openTelegramReadConfirm({
       purpose: parsed.purpose,
       maxResults: parsed.maxResults,
+      chat: parsed.chat,
     });
     if (!decision.confirmed) {
       options?.onStatus?.(null);
@@ -66,6 +79,7 @@ export async function executeTelegramRead(
 
     options?.onStatus?.("Reading Telegram…");
     const result = await Api.telegramRead({
+      chat: decision.request.chat ?? undefined,
       maxResults: decision.request.maxResults,
     });
     options?.onStatus?.(null);

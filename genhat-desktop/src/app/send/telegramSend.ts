@@ -24,7 +24,7 @@ export function parseTelegramSendArgs(
   const bodyRaw = args.body ?? args.text ?? args.message;
   const body = typeof bodyRaw === "string" ? bodyRaw : "";
 
-  if (!to) return { error: "telegram_send requires a chat in `to` (@username or a saved name)." };
+  if (!to) return { error: "telegram_send requires a chat in `to` (saved name or @username)." };
   if (!body.trim()) return { error: "telegram_send requires a message body." };
   if (body.length > MAX_BODY_CHARS) {
     return { error: "The Telegram message is too long." };

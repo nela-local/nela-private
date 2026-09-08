@@ -789,6 +789,7 @@ export interface TelegramSendResult {
 export interface TelegramMessageSummary {
   chat: string;
   username?: string | null;
+  from?: string | null;
   preview?: string | null;
 }
 

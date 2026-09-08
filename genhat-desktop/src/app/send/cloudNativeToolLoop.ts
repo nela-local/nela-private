@@ -871,12 +871,13 @@ export async function runCloudNativeToolLoop(
     if (hasTelegram) {
       parts.push(
         "You can send Telegram with telegram_send (to, body). " +
-          "Put the chat in `to` as @username or a saved name. " +
+          "Put the chat in `to` as the name shown in the Telegram chat list (from telegram_read), not @username unless that is all you have. " +
           "The user will confirm the draft in the app before anything is sent. " +
           "Never claim a message was sent until the tool result has sent=true. " +
           "If they cancel, say it was not sent. " +
-          "You can read recent chats with telegram_read (optional max_results 1–5, purpose). " +
-          "The user must Allow once before any preview is fetched. " +
+          "You can list recent chats with telegram_read (omit chat; max_results 1–10). " +
+          "You can read a thread with telegram_read (chat = saved name, max_results 1–20). " +
+          "The user must Allow once before any preview or history is fetched. " +
           "Summarize only from the tool result; never invent Telegram contents."
       );
     } else {

@@ -13,7 +13,12 @@ use tokio::sync::Mutex as AsyncMutex;
 const SESSION_FILE: &str = "nela.session";
 const PROFILE_FILE: &str = "profile.json";
 const MAX_BODY_CHARS: usize = 4096;
-const MAX_READ: usize = 5;
+const MAX_DIALOG_LIST: usize = 10;
+const DEFAULT_DIALOG_LIST: usize = 5;
+const MAX_HISTORY: usize = 20;
+const DEFAULT_HISTORY: usize = 10;
+const DIALOG_SCAN: usize = 200;
+const PREVIEW_CHARS: usize = 280;
 
 static APP_DATA_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -51,6 +56,8 @@ pub struct TelegramSendResult {
 pub struct TelegramMessageSummary {
     pub chat: String,
     pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     pub preview: Option<String>,
 }
 
@@ -438,9 +445,85 @@ fn chat_username(chat: &Chat) -> Option<String> {
 }
 
 fn chat_label(chat: &Chat) -> String {
-    chat_username(chat)
-        .filter(|s| s.len() > 1)
-        .unwrap_or_else(|| chat.name().to_string())
+    match chat {
+        Chat::User(user) => {
+            let full = user.full_name();
+            if !full.trim().is_empty() {
+                return full;
+            }
+        }
+        _ => {}
+    }
+    let title = chat.name();
+    if !title.is_empty() {
+        return title.to_string();
+    }
+    chat_username(chat).unwrap_or_else(|| "Telegram chat".to_string())
+}
+
+fn normalize_label(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// Rank 0 = exact name/@username, 1 = contains. None = no match.
+fn match_chat_name(needle: &str, candidates: &[&str]) -> Option<u8> {
+    let want = normalize_label(needle);
+    if want.is_empty() {
+        return None;
+    }
+    let want_user = want.trim_start_matches('@');
+    let mut contains = None;
+    for cand in candidates {
+        let c = normalize_label(cand);
+        if c.is_empty() {
+            continue;
+        }
+        if c == want || c == want_user || format!("@{c}") == want {
+            return Some(0);
+        }
+        if want_user.len() >= 2 && c.contains(want_user) {
+            contains = Some(1);
+        }
+    }
+    contains
+}
+
+fn chat_match_candidates(chat: &Chat) -> Vec<String> {
+    let mut out = Vec::new();
+    match chat {
+        Chat::User(user) => {
+            let full = user.full_name();
+            if !full.trim().is_empty() {
+                out.push(full);
+            }
+            let first = user.first_name();
+            if !first.is_empty() {
+                out.push(first.to_string());
+            }
+            if let Some(last) = user.last_name() {
+                out.push(last.to_string());
+            }
+        }
+        _ => {
+            let title = chat.name();
+            if !title.is_empty() {
+                out.push(title.to_string());
+            }
+        }
+    }
+    if let Some(u) = chat.username() {
+        out.push(u.to_string());
+        out.push(format!("@{u}"));
+    }
+    out
+}
+
+fn trim_preview(text: &str) -> Option<String> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    Some(t.chars().take(PREVIEW_CHARS).collect())
 }
 
 async fn resolve_chat(client: &Client, raw: &str) -> Result<Chat, String> {
@@ -448,37 +531,36 @@ async fn resolve_chat(client: &Client, raw: &str) -> Result<Chat, String> {
     if needle.is_empty() {
         return Err("Choose a chat to message.".to_string());
     }
+    let mut dialogs = client.iter_dialogs();
+    let mut scanned = 0usize;
+    let mut contains_hit: Option<Chat> = None;
+    while let Some(dialog) = dialogs.next().await.map_err(map_err)? {
+        scanned += 1;
+        if scanned > DIALOG_SCAN {
+            break;
+        }
+        let chat = dialog.chat().clone();
+        let cands = chat_match_candidates(&chat);
+        let refs: Vec<&str> = cands.iter().map(String::as_str).collect();
+        match match_chat_name(needle, &refs) {
+            Some(0) => return Ok(chat),
+            Some(_) if contains_hit.is_none() => contains_hit = Some(chat),
+            _ => {}
+        }
+    }
+    if let Some(chat) = contains_hit {
+        return Ok(chat);
+    }
+
     let uname = needle.trim_start_matches('@').trim();
-    if !uname.is_empty() && !uname.contains(' ') {
+    let try_username = needle.starts_with('@') || !needle.contains(char::is_whitespace);
+    if try_username && !uname.is_empty() {
         if let Some(chat) = client.resolve_username(uname).await.map_err(map_err)? {
             return Ok(chat);
         }
     }
-    let want = needle.to_ascii_lowercase();
-    let want_user = uname.to_ascii_lowercase();
-    let mut dialogs = client.iter_dialogs();
-    let mut scanned = 0usize;
-    while let Some(dialog) = dialogs.next().await.map_err(map_err)? {
-        scanned += 1;
-        if scanned > 80 {
-            break;
-        }
-        let chat = dialog.chat().clone();
-        let label = chat.name().to_ascii_lowercase();
-        let user = chat
-            .username()
-            .map(|u| u.to_ascii_lowercase())
-            .unwrap_or_default();
-        if label == want
-            || user == want_user
-            || format!("@{user}") == want
-            || label.contains(&want)
-        {
-            return Ok(chat);
-        }
-    }
     Err(format!(
-        "Could not find a Telegram chat named “{needle}”. Use @username or a saved chat name."
+        "Could not find a Telegram chat named “{needle}”. Use the name shown in your chat list or @username."
     ))
 }
 
@@ -508,10 +590,10 @@ pub async fn send_message(to: &str, body: &str) -> Result<TelegramSendResult, St
     })
 }
 
-pub async fn read_messages(max_results: Option<u32>) -> Result<TelegramReadResult, String> {
-    let max = max_results
-        .unwrap_or(1)
-        .clamp(1, MAX_READ as u32) as usize;
+pub async fn read_messages(
+    chat: Option<String>,
+    max_results: Option<u32>,
+) -> Result<TelegramReadResult, String> {
     let app_data = app_data_dir()?;
     if !session_looks_signed_in(&app_data) {
         return Ok(TelegramReadResult {
@@ -528,24 +610,56 @@ pub async fn read_messages(max_results: Option<u32>) -> Result<TelegramReadResul
             reason: Some("Telegram is not connected. Connect again.".into()),
         });
     }
-    let mut dialogs = client.iter_dialogs();
-    let mut messages = Vec::new();
-    while let Some(dialog) = dialogs.next().await.map_err(map_err)? {
-        if messages.len() >= max {
-            break;
+
+    let named = chat.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let messages = if let Some(name) = named {
+        let max = max_results
+            .unwrap_or(DEFAULT_HISTORY as u32)
+            .clamp(1, MAX_HISTORY as u32) as usize;
+        let peer = resolve_chat(&client, name).await?;
+        let label = chat_label(&peer);
+        let username = chat_username(&peer);
+        let mut iter = client.iter_messages(peer.clone()).limit(max);
+        let mut newest_first = Vec::new();
+        while let Some(msg) = iter.next().await.map_err(map_err)? {
+            let from = if msg.outgoing() {
+                "You".to_string()
+            } else {
+                msg.sender()
+                    .map(|s| chat_label(&s))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| label.clone())
+            };
+            newest_first.push(TelegramMessageSummary {
+                chat: label.clone(),
+                username: username.clone(),
+                from: Some(from),
+                preview: trim_preview(msg.text()),
+            });
         }
-        let chat = dialog.chat();
-        let preview = dialog.last_message.as_ref().map(|m| {
-            let t = m.text();
-            let trimmed: String = t.chars().take(280).collect();
-            trimmed
-        });
-        messages.push(TelegramMessageSummary {
-            chat: chat_label(chat),
-            username: chat_username(chat),
-            preview,
-        });
-    }
+        newest_first.reverse();
+        newest_first
+    } else {
+        let max = max_results
+            .unwrap_or(DEFAULT_DIALOG_LIST as u32)
+            .clamp(1, MAX_DIALOG_LIST as u32) as usize;
+        let mut dialogs = client.iter_dialogs();
+        let mut out = Vec::new();
+        while let Some(dialog) = dialogs.next().await.map_err(map_err)? {
+            if out.len() >= max {
+                break;
+            }
+            let chat = dialog.chat();
+            out.push(TelegramMessageSummary {
+                chat: chat_label(chat),
+                username: chat_username(chat),
+                from: None,
+                preview: dialog.last_message.as_ref().and_then(|m| trim_preview(m.text())),
+            });
+        }
+        out
+    };
+
     save_session(&client, &session_path(&app_data))?;
     Ok(TelegramReadResult {
         ok: true,
@@ -570,5 +684,16 @@ mod tests {
         assert!(!lower.contains(".env"));
         assert!(!lower.contains("api_id"));
         assert!(!lower.contains("my.telegram"));
+    }
+
+    #[test]
+    fn matches_saved_name_before_username() {
+        let cands = ["Priya Sharma", "Priya", "Sharma", "priya_s", "@priya_s"];
+        assert_eq!(match_chat_name("Priya Sharma", &cands), Some(0));
+        assert_eq!(match_chat_name("priya", &cands), Some(0));
+        assert_eq!(match_chat_name("@priya_s", &cands), Some(0));
+        assert_eq!(match_chat_name("Sharma", &cands), Some(0));
+        assert_eq!(match_chat_name("priya sha", &cands), Some(1));
+        assert_eq!(match_chat_name("nobody-here", &cands), None);
     }
 }

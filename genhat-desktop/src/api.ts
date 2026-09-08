@@ -1478,8 +1478,12 @@ export const Api = {
     });
   },
 
-  async telegramRead(input?: { maxResults?: number }): Promise<TelegramReadResult> {
+  async telegramRead(input?: {
+    chat?: string;
+    maxResults?: number;
+  }): Promise<TelegramReadResult> {
     return invoke<TelegramReadResult>("telegram_read", {
+      chat: input?.chat ?? null,
       maxResults: input?.maxResults ?? null,
     });
   },

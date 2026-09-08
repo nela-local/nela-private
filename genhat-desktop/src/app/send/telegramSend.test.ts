@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseTelegramSendArgs } from "./telegramSend.js";
+import { parseTelegramReadArgs } from "./telegramRead.js";
 import { looksLikeTelegramRequest } from "./telegramConnectIntent.js";
 
 describe("parseTelegramSendArgs", () => {
@@ -18,6 +19,28 @@ describe("parseTelegramSendArgs", () => {
   it("rejects missing chat or body", () => {
     assert.ok("error" in parseTelegramSendArgs({ body: "Hi" }));
     assert.ok("error" in parseTelegramSendArgs({ to: "@priya", body: "  " }));
+  });
+});
+
+describe("parseTelegramReadArgs", () => {
+  it("defaults to listing a few recent chats", () => {
+    const parsed = parseTelegramReadArgs({});
+    assert.equal(parsed.chat, null);
+    assert.equal(parsed.maxResults, 5);
+  });
+
+  it("reads history for a saved name", () => {
+    const parsed = parseTelegramReadArgs({
+      chat: "Priya Sharma",
+      max_results: 10,
+    });
+    assert.equal(parsed.chat, "Priya Sharma");
+    assert.equal(parsed.maxResults, 10);
+  });
+
+  it("caps history at 20 and dialogs at 10", () => {
+    assert.equal(parseTelegramReadArgs({ chat: "Priya", max_results: 99 }).maxResults, 20);
+    assert.equal(parseTelegramReadArgs({ max_results: 99 }).maxResults, 10);
   });
 });
 

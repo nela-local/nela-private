@@ -415,13 +415,15 @@ export const TELEGRAM_SEND_TOOL: CloudToolDefinition = {
       "The user MUST confirm the draft in the NELA app before anything is sent. " +
       "Never claim the message was sent until the tool result has sent=true. " +
       "Use only when the user asked you to message someone on Telegram. " +
-      "Put the chat in `to` as @username or a saved chat name.",
+      "Put the chat in `to` as the display name from telegram_read (the name shown in the chat list). " +
+      "Use @username only if that is all you have.",
     parameters: {
       type: "object",
       properties: {
         to: {
           type: "string",
-          description: "Chat to message: @username or a saved Telegram name.",
+          description:
+            "Chat to message: the name shown in Telegram (saved/contact name), or @username if that is all you have.",
         },
         body: {
           type: "string",
@@ -439,16 +441,24 @@ export const TELEGRAM_READ_TOOL: CloudToolDefinition = {
   function: {
     name: "telegram_read",
     description:
-      "Fetch recent Telegram chat previews so you can summarize or answer questions about them. " +
+      "Read Telegram chats from the user's connected account. " +
       "The user MUST approve each read in the NELA app before any message content is fetched. " +
-      "Use when the user asks about their latest Telegram messages. " +
-      "Default to max_results=1. Never invent Telegram content — only use the tool result.",
+      "For “what’s new / latest chats”, omit `chat` (lists recent chats by display name, default 5, max 10). " +
+      "For history or “what did X say”, set `chat` to the saved name from the chat list and max_results 5–20 (default 10). " +
+      "When sending later, use the display `chat` name from this result, not @username unless that is all you have. " +
+      "Never invent Telegram content — only use the tool result.",
     parameters: {
       type: "object",
       properties: {
+        chat: {
+          type: "string",
+          description:
+            "Saved chat name as shown in Telegram, or @username. Omit to list recent chats.",
+        },
         max_results: {
           type: "number",
-          description: "How many recent chats to fetch (1–5). Default 1.",
+          description:
+            "With chat: how many recent messages (1–20, default 10). Without chat: how many recent chats (1–10, default 5).",
         },
         purpose: {
           type: "string",

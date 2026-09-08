@@ -62,8 +62,9 @@ pub async fn telegram_send(
 #[tauri::command]
 pub async fn telegram_read(
     app: AppHandle,
+    chat: Option<String>,
     max_results: Option<u32>,
 ) -> Result<TelegramReadResult, String> {
     bind_app_data(&app)?;
-    telegram::read_messages(max_results).await
+    telegram::read_messages(chat, max_results).await
 }

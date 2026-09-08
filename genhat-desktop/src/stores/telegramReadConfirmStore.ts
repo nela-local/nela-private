@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type TelegramReadRequest = {
   purpose: string;
   maxResults: number;
+  chat: string | null;
 };
 
 export type TelegramReadConfirmResult =
