@@ -100,6 +100,9 @@ fancy-regex = "0.14"
 scraper = "0.22"
 urlencoding = "2"
 
+# ── Telegram user connector (MTProto; session stays on-device) ──
+grammers-client = "0.7"
+
 # ── Playground pipeline engine ──
 imap = "2"
 native-tls = "0.2"

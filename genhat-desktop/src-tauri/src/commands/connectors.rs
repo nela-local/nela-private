@@ -38,12 +38,9 @@ pub fn connectors_list_connections(app: AppHandle) -> Result<Vec<ConnectionInfo>
     let dir = app_data(&app)?;
     let mut out = connections::list(&dir)?;
 
-    // Merge live account status from desktop_pkce (and similar) backends.
+    // Merge live account status from on-device backends (PKCE, Telegram, …).
     Registry::ensure_initialized();
     for provider in Registry::list_providers() {
-        if provider.connect_flow != "desktop_pkce" {
-            continue;
-        }
         if let Some(backend) = crate::connectors::backend::get_backend(&provider.id) {
             if let Ok(Some(info)) = backend.account_status(&app) {
                 out.retain(|c| c.provider_id != provider.id);
@@ -191,7 +188,7 @@ pub async fn connectors_disconnect(
 
     // Provider-id disconnect for account-lifecycle connectors (e.g. "gmail").
     if let Some(def) = crate::connectors::catalog::find_definition(&connection_id) {
-        if def.connect_flow == "desktop_pkce" {
+        if def.connect_flow == "desktop_pkce" || def.connect_flow == "telegram_mtproto" {
             if let Some(backend) = crate::connectors::backend::get_backend(&connection_id) {
                 return backend
                     .disconnect_account(&app)

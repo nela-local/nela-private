@@ -145,6 +145,7 @@ fn main() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from(".genhat_data"));
             app_lib::connectors::gmail::set_app_data_dir(app_data_dir.clone());
+            app_lib::connectors::telegram::set_app_data_dir(app_data_dir.clone());
             let llama_runtime_dir = app_data_dir.join("llama-runtime");
             app_lib::paths::init_llama_runtime_root(llama_runtime_dir.clone());
             app_lib::paths::init_artifacts_root(app_data_dir.join("artifacts"));
@@ -487,6 +488,14 @@ fn main() {
             app_lib::commands::gmail::gmail_disconnect,
             app_lib::commands::gmail::gmail_send,
             app_lib::commands::gmail::gmail_read,
+            // Telegram user connector (MTProto; session stays on-device)
+            app_lib::commands::telegram::telegram_status,
+            app_lib::commands::telegram::telegram_connect_start,
+            app_lib::commands::telegram::telegram_connect_code,
+            app_lib::commands::telegram::telegram_connect_password,
+            app_lib::commands::telegram::telegram_disconnect,
+            app_lib::commands::telegram::telegram_send,
+            app_lib::commands::telegram::telegram_read,
             // Cloud storage connectors (File Indexer mirrors)
             app_lib::commands::connectors::connectors_list_providers,
             app_lib::commands::connectors::connectors_list_connections,

@@ -23,16 +23,34 @@ pub const LOCAL_WEB_BASE_URL: &str = "http://localhost:3000";
 static RESOLVED_API: RwLock<Option<String>> = RwLock::new(None);
 static RESOLVED_WEB: RwLock<Option<String>> = RwLock::new(None);
 
+fn load_dotenv_path(path: impl AsRef<std::path::Path>) {
+    let path = path.as_ref();
+    if path.is_file() {
+        let _ = dotenvy::from_path(path);
+    }
+}
+
 /// Load dotenv files without overriding already-set process env vars.
+///
+/// `tauri dev` cwd is often `src-tauri`; the shipped exe cwd is often elsewhere.
+/// Walk a few well-known locations so local `.env` is found either way.
 pub fn load_dotenv_files() {
-    for path in [
-        std::path::PathBuf::from(".env"),
-        std::path::PathBuf::from("../.env"),
-    ] {
-        if path.is_file() {
-            let _ = dotenvy::from_path(&path);
+    load_dotenv_path(".env");
+    load_dotenv_path("../.env");
+
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    load_dotenv_path(manifest.join(".env"));
+    load_dotenv_path(manifest.join("../.env"));
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        for _ in 0..6 {
+            let Some(current) = dir else { break };
+            load_dotenv_path(current.join(".env"));
+            dir = current.parent().map(|p| p.to_path_buf());
         }
     }
+
     let _ = dotenvy::dotenv();
 }
 

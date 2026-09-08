@@ -405,6 +405,62 @@ export const GMAIL_READ_TOOL: CloudToolDefinition = {
   },
 };
 
+/** Desktop-hosted Telegram send — host always confirms before the API call. */
+export const TELEGRAM_SEND_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "telegram_send",
+    description:
+      "Compose a Telegram message to send from the user's connected Telegram account. " +
+      "The user MUST confirm the draft in the NELA app before anything is sent. " +
+      "Never claim the message was sent until the tool result has sent=true. " +
+      "Use only when the user asked you to message someone on Telegram. " +
+      "Put the chat in `to` as @username or a saved chat name.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: {
+          type: "string",
+          description: "Chat to message: @username or a saved Telegram name.",
+        },
+        body: {
+          type: "string",
+          description: "Plain-text message body",
+        },
+      },
+      required: ["to", "body"],
+    },
+  },
+};
+
+/** Desktop-hosted Telegram read — host always confirms before fetching chats. */
+export const TELEGRAM_READ_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "telegram_read",
+    description:
+      "Fetch recent Telegram chat previews so you can summarize or answer questions about them. " +
+      "The user MUST approve each read in the NELA app before any message content is fetched. " +
+      "Use when the user asks about their latest Telegram messages. " +
+      "Default to max_results=1. Never invent Telegram content — only use the tool result.",
+    parameters: {
+      type: "object",
+      properties: {
+        max_results: {
+          type: "number",
+          description: "How many recent chats to fetch (1–5). Default 1.",
+        },
+        purpose: {
+          type: "string",
+          description:
+            "Short plain-language reason shown on the allow card.",
+        },
+      },
+      required: [],
+    },
+  },
+};
+
 export function buildCloudChatTools(options?: {
   webEnabled?: boolean;
   fileSearchEnabled?: boolean;
@@ -415,6 +471,8 @@ export function buildCloudChatTools(options?: {
   askFollowUpEnabled?: boolean;
   /** Gmail compose/send when the user has connected Gmail. */
   gmailEnabled?: boolean;
+  /** Telegram send/read when the user has connected Telegram. */
+  telegramEnabled?: boolean;
 }): CloudToolDefinition[] {
   const tools: CloudToolDefinition[] = [];
   if (options?.webEnabled) tools.push(WEB_SEARCH_TOOL, WEB_EXTRACT_TOOL);
@@ -424,6 +482,9 @@ export function buildCloudChatTools(options?: {
   if (options?.askFollowUpEnabled !== false) tools.push(ASK_FOLLOWUP_TOOL);
   if (options?.gmailEnabled) {
     tools.push(GMAIL_SEND_TOOL, GMAIL_READ_TOOL);
+  }
+  if (options?.telegramEnabled) {
+    tools.push(TELEGRAM_SEND_TOOL, TELEGRAM_READ_TOOL);
   }
   return tools;
 }

@@ -23,9 +23,16 @@ import ChatMessageItem, { GenerationTimer } from "./ChatMessageItem";
 import GmailSendConfirmCard from "./GmailSendConfirmCard";
 import GmailReadConfirmCard from "./GmailReadConfirmCard";
 import GmailConnectCard from "./GmailConnectCard";
+import TelegramConnectCard from "./TelegramConnectCard";
+import TelegramSendConfirmCard from "./TelegramSendConfirmCard";
+import TelegramReadConfirmCard from "./TelegramReadConfirmCard";
+import TelegramConnectModal from "./TelegramConnectModal";
 import { useGmailSendConfirmStore } from "../stores/gmailSendConfirmStore";
 import { useGmailReadConfirmStore } from "../stores/gmailReadConfirmStore";
 import { useGmailConnectPromptStore } from "../stores/gmailConnectPromptStore";
+import { useTelegramSendConfirmStore } from "../stores/telegramSendConfirmStore";
+import { useTelegramReadConfirmStore } from "../stores/telegramReadConfirmStore";
+import { useTelegramConnectPromptStore } from "../stores/telegramConnectPromptStore";
 import ReasoningDisclosure from "./ReasoningDisclosure";
 import { scrubChatArtifactProtocol } from "../app/streamArtifactParser";
 import "./ModeBanner.css";
@@ -160,6 +167,9 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const gmailConfirmPending = useGmailSendConfirmStore((s) => s.pending);
   const gmailReadConfirmPending = useGmailReadConfirmStore((s) => s.pending);
   const gmailConnectPrompt = useGmailConnectPromptStore((s) => s.visible);
+  const telegramConfirmPending = useTelegramSendConfirmStore((s) => s.pending);
+  const telegramReadConfirmPending = useTelegramReadConfirmStore((s) => s.pending);
+  const telegramConnectPrompt = useTelegramConnectPromptStore((s) => s.visible);
 
   useEffect(() => {
     void refreshConnectors();
@@ -229,13 +239,13 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   useEffect(() => {
     // Follow the live bubble while tokens stream. While only thinking/loading,
     // respect the user if they scrolled up to read history.
-    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !stickToBottomRef.current) return;
+    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !telegramConfirmPending && !telegramReadConfirmPending && !telegramConnectPrompt && !stickToBottomRef.current) return;
     const el = messagesParentRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt]);
+  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt, telegramConfirmPending, telegramReadConfirmPending, telegramConnectPrompt]);
 
   // Close composer menus while a response is generating.
   if (isLoading && (showAttachMenu || showToolsMenu)) {
@@ -960,6 +970,10 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         <GmailConnectCard />
         <GmailSendConfirmCard />
         <GmailReadConfirmCard />
+        <TelegramConnectCard />
+        <TelegramSendConfirmCard />
+        <TelegramReadConfirmCard />
+        <TelegramConnectModal />
 
         {isLoading &&
           !messages.some(

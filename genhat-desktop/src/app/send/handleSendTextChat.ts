@@ -41,8 +41,11 @@ import { streamChatByMode, willRouteToCloud } from "./cloudOrLocalStream";
 import type { SendHandlerContext } from "./types";
 import { runCloudAwareToolLoop } from "./cloudNativeToolLoop";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
+import { looksLikeTelegramRequest } from "./telegramConnectIntent";
 import { useGmailStore } from "../../stores/gmailStore";
 import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore";
+import { useTelegramStore } from "../../stores/telegramStore";
+import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromptStore";
 import { useChatModeStore } from "../../stores/chatModeStore";
 import { useArtifactStreamStore } from "../../stores/artifactStreamStore";
 import {
@@ -88,6 +91,18 @@ export async function handleSendTextChat(
       })
       .catch(() => {
         useGmailConnectPromptStore.getState().show();
+      });
+  }
+
+  if (looksLikeTelegramRequest(text)) {
+    void useTelegramStore
+      .getState()
+      .refresh()
+      .then((status) => {
+        if (!status.connected) useTelegramConnectPromptStore.getState().show();
+      })
+      .catch(() => {
+        useTelegramConnectPromptStore.getState().show();
       });
   }
 

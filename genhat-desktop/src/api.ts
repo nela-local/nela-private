@@ -33,6 +33,10 @@ import type {
   GmailStatus,
   GmailSendResult,
   GmailReadResult,
+  TelegramStatus,
+  TelegramConnectNext,
+  TelegramSendResult,
+  TelegramReadResult,
 } from "./types";
 import {
   llamaContextKey,
@@ -1441,6 +1445,39 @@ export const Api = {
     return invoke<GmailReadResult>("gmail_read", {
       maxResults: input?.maxResults ?? null,
       query: input?.query ?? null,
+    });
+  },
+
+  async telegramStatus(): Promise<TelegramStatus> {
+    return invoke<TelegramStatus>("telegram_status");
+  },
+
+  async telegramConnectStart(phone: string): Promise<TelegramConnectNext> {
+    return invoke<TelegramConnectNext>("telegram_connect_start", { phone });
+  },
+
+  async telegramConnectCode(code: string): Promise<TelegramConnectNext> {
+    return invoke<TelegramConnectNext>("telegram_connect_code", { code });
+  },
+
+  async telegramConnectPassword(password: string): Promise<TelegramConnectNext> {
+    return invoke<TelegramConnectNext>("telegram_connect_password", { password });
+  },
+
+  async telegramDisconnect(): Promise<TelegramStatus> {
+    return invoke<TelegramStatus>("telegram_disconnect");
+  },
+
+  async telegramSend(input: { to: string; body: string }): Promise<TelegramSendResult> {
+    return invoke<TelegramSendResult>("telegram_send", {
+      to: input.to,
+      body: input.body,
+    });
+  },
+
+  async telegramRead(input?: { maxResults?: number }): Promise<TelegramReadResult> {
+    return invoke<TelegramReadResult>("telegram_read", {
+      maxResults: input?.maxResults ?? null,
     });
   },
 };

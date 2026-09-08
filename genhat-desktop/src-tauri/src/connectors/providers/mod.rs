@@ -13,6 +13,7 @@ pub mod gdrive;
 pub mod gmail_backend;
 pub mod local;
 pub mod onedrive;
+pub mod telegram;
 
 use crate::connectors::backend::{register_backend, ConnectorBackend};
 use crate::connectors::error::ConnectorError;
@@ -142,6 +143,7 @@ impl ConnectorBackend for GDriveBackend {
 pub fn register_all() {
     register_backend(Arc::new(GDriveBackend));
     register_backend(Arc::new(gmail_backend::GmailBackend));
+    register_backend(Arc::new(telegram::TelegramBackend));
     let _ = (
         dropbox::PROVIDER_ID,
         onedrive::PROVIDER_ID,

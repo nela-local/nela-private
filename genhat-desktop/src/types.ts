@@ -768,6 +768,36 @@ export interface GmailReadResult {
   needsReauth?: boolean | null;
 }
 
+export interface TelegramStatus {
+  connected: boolean;
+  username?: string | null;
+  phone?: string | null;
+}
+
+export interface TelegramConnectNext {
+  next: "code" | "password" | "connected" | string;
+  username?: string | null;
+  hint?: string | null;
+}
+
+export interface TelegramSendResult {
+  sent: boolean;
+  id?: number | null;
+  reason?: string | null;
+}
+
+export interface TelegramMessageSummary {
+  chat: string;
+  username?: string | null;
+  preview?: string | null;
+}
+
+export interface TelegramReadResult {
+  ok: boolean;
+  messages?: TelegramMessageSummary[] | null;
+  reason?: string | null;
+}
+
 export interface DevicePollPendingResponse {
   status: "pending";
 }

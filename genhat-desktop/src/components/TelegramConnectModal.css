@@ -1,0 +1,20 @@
+.telegram-wizard {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: color-mix(in srgb, #05070b 55%, transparent);
+}
+
+.telegram-wizard__card {
+  margin: 0;
+  width: min(28rem, 100%);
+}
+
+.telegram-wizard .gmail-confirm__send {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}

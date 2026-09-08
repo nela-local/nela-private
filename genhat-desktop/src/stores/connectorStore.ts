@@ -22,6 +22,7 @@ import type {
 } from "../types";
 import { friendlyErrorFromUnknown } from "../app/friendlyError";
 import { useGmailStore } from "./gmailStore";
+import { useTelegramStore } from "./telegramStore";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -35,6 +36,14 @@ function syncGmailStoreFromConnections(connections: ConnectorConnection[]) {
     email: gmail?.accountEmail ?? null,
     loading: false,
     error: null,
+  });
+}
+
+function syncTelegramStoreFromConnections(connections: ConnectorConnection[]) {
+  const telegram = connections.find((c) => c.providerId === "telegram");
+  useTelegramStore.setState({
+    connected: Boolean(telegram),
+    username: telegram?.accountEmail ?? null,
   });
 }
 
@@ -82,6 +91,7 @@ function resolveConnectFlow(
   if (info?.connectFlow) return info.connectFlow;
   // Never assume cloud_broker — Gmail is desktop_pkce.
   if (provider === "gmail") return "desktop_pkce";
+  if (provider === "telegram") return "telegram_mtproto";
   if (provider === "local") return "none";
   return "cloud_broker";
 }
@@ -116,6 +126,7 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
         connectorsListIndexedRoots(),
       ]);
       syncGmailStoreFromConnections(connections);
+      syncTelegramStoreFromConnections(connections);
       set({ providers, connections, indexedRoots, error: null });
     } catch (e) {
       set({ error: friendlyErrorFromUnknown(e) });
@@ -146,10 +157,17 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
         ) {
           const next = [connection, ...get().connections];
           syncGmailStoreFromConnections(next);
+          syncTelegramStoreFromConnections(next);
           set({ connections: next });
         }
         set({ busy: false, connectingProviderId: null });
         return connection;
+      }
+
+      if (flow === "telegram_mtproto") {
+        useTelegramStore.getState().openWizard();
+        set({ busy: false, connectingProviderId: null });
+        return null;
       }
 
       if (flow === "none") {

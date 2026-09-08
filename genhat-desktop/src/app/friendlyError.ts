@@ -78,6 +78,13 @@ export function friendlyError(raw: string | undefined | null): string {
   }
 
   if (
+    lower.includes("nela_telegram_api") ||
+    (lower.includes("telegram") && lower.includes(".env"))
+  ) {
+    return "Telegram isn't available in this copy of NELA. Update the app and try Connect again.";
+  }
+
+  if (
     lower.includes("cloud_busy") ||
     lower.includes("cloud is busy") ||
     lower.includes("openrouter_failed") ||

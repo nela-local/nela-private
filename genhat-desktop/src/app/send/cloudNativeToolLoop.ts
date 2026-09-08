@@ -41,7 +41,9 @@ import { currentQuarter } from "../nelaSystemPrompt";
 import type { AskFollowUpArgs } from "./askFollowUp";
 import { beginAskFollowUpTurn } from "../../stores/followUpStore";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
+import { looksLikeTelegramRequest } from "./telegramConnectIntent";
 import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore";
+import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromptStore";
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
 const MAX_CHART_PREP_ROUNDS = 6;
@@ -557,6 +559,30 @@ async function executeToolCall(
     };
   }
 
+  if (name === "telegram_send") {
+    const { executeTelegramSend } = await import("./telegramSend");
+    const result = await executeTelegramSend(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+    };
+  }
+
+  if (name === "telegram_read") {
+    const { executeTelegramRead } = await import("./telegramRead");
+    const result = await executeTelegramRead(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+    };
+  }
+
   return {
     content: `Unknown tool: ${name}`,
     webSearchResult,
@@ -690,6 +716,12 @@ export async function runCloudNativeToolLoop(
   } catch {
     gmailEnabled = false;
   }
+  let telegramEnabled = false;
+  try {
+    telegramEnabled = Boolean((await Api.telegramStatus()).connected);
+  } catch {
+    telegramEnabled = false;
+  }
   const tools = buildCloudChatTools({
     webEnabled,
     fileSearchEnabled,
@@ -697,6 +729,7 @@ export async function runCloudNativeToolLoop(
     chartEnabled: Boolean(loopOpts.chartEnabled),
     askFollowUpEnabled: true,
     gmailEnabled,
+    telegramEnabled,
   });
 
   let messages = toCloudMessages(loopOpts.messages);
@@ -710,7 +743,10 @@ export async function runCloudNativeToolLoop(
   const hasGmail = tools.some(
     (t) => t.function.name === "gmail_send" || t.function.name === "gmail_read"
   );
-  if (hasWebSearch || hasFileSearch || hasRenderChart || hasAskFollowUp || hasGmail) {
+  const hasTelegram = tools.some(
+    (t) => t.function.name === "telegram_send" || t.function.name === "telegram_read"
+  );
+  if (hasWebSearch || hasFileSearch || hasRenderChart || hasAskFollowUp || hasGmail || hasTelegram) {
     const parts: string[] = [];
     if (hasWebSearch) {
       parts.push(
@@ -770,6 +806,32 @@ export async function runCloudNativeToolLoop(
         parts.push(
           "Gmail is not connected. Tell the user to tap Connect Gmail on the card in chat " +
             "(or Settings → Connections). Never claim mail was sent or read."
+        );
+      }
+    }
+    if (hasTelegram) {
+      parts.push(
+        "You can send Telegram with telegram_send (to, body). " +
+          "Put the chat in `to` as @username or a saved name. " +
+          "The user will confirm the draft in the app before anything is sent. " +
+          "Never claim a message was sent until the tool result has sent=true. " +
+          "If they cancel, say it was not sent. " +
+          "You can read recent chats with telegram_read (optional max_results 1–5, purpose). " +
+          "The user must Allow once before any preview is fetched. " +
+          "Summarize only from the tool result; never invent Telegram contents."
+      );
+    } else {
+      const lastUser = [...messages]
+        .reverse()
+        .find((m) => m.role === "user");
+      const lastUserText = lastUser
+        ? flattenMessageContent(lastUser.content)
+        : "";
+      if (looksLikeTelegramRequest(lastUserText)) {
+        useTelegramConnectPromptStore.getState().show();
+        parts.push(
+          "Telegram is not connected. Tell the user to tap Connect Telegram on the card in chat " +
+            "(or Settings → Connections). Never claim a Telegram message was sent or read."
         );
       }
     }

@@ -7,11 +7,13 @@
 //! Auth flows (from catalog `connect_flow`):
 //! - `cloud_broker` — OAuth code exchange via nela-backend (optional / legacy)
 //! - `desktop_pkce` — on-device PKCE loopback (Gmail + Drive); no cloud broker
+//! - `telegram_mtproto` — phone + login code + optional 2FA; session on-device
 //! - `none` — no OAuth
 
 pub mod desktop_pkce;
 pub mod gmail;
 pub mod google_oauth;
+pub mod telegram;
 
 pub mod connections;
 pub mod credentials;

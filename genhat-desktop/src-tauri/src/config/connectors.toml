@@ -11,11 +11,12 @@
 # capabilities (informational + future gating):
 #   browse | sync | fetch | create | update | send
 #
-# auth_kind: oauth2 | api_key | none
+# auth_kind: oauth2 | api_key | mtproto | none
 # connect_flow:
-#   cloud_broker  — OAuth via nela-backend start/poll (Drive today)
-#   desktop_pkce  — on-device PKCE loopback (Gmail today)
-#   none          — no OAuth
+#   cloud_broker      — OAuth via nela-backend start/poll (legacy Drive)
+#   desktop_pkce      — on-device PKCE loopback (Gmail + Drive)
+#   telegram_mtproto  — phone + login code + optional 2FA (Telegram)
+#   none              — no OAuth
 #
 # show_in_attach_menu: if true, appears under the chat "+" menu
 #
@@ -49,6 +50,17 @@ oauth = "google"
 connect_flow = "desktop_pkce"
 capabilities = ["send", "read"]
 description = "Send email from chat and read recent messages you approve. Sign-in uses on-device Google PKCE."
+show_in_attach_menu = false
+
+[[connector]]
+id = "telegram"
+display_name = "Telegram"
+category = "communication"
+status = "available"
+auth_kind = "mtproto"
+connect_flow = "telegram_mtproto"
+capabilities = ["send", "read"]
+description = "Send and read Telegram messages you approve. Sign-in uses your phone number on this device."
 show_in_attach_menu = false
 
 [[connector]]

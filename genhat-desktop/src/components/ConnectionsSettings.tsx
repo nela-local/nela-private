@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { HardDrive, Loader2, Mail, Plug } from "lucide-react";
+import { HardDrive, Loader2, Mail, MessageCircle, Plug } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 import { useConnectorStore } from "../stores/connectorStore";
 
 function iconFor(id: string, category?: string) {
   if (id === "gmail") return Mail;
+  if (id === "telegram") return MessageCircle;
   if (category === "storage" || id === "gdrive") return HardDrive;
   return Plug;
 }
@@ -36,9 +37,8 @@ export default function ConnectionsSettings() {
         <div className="text-[0.85rem] font-semibold text-txt">Connections</div>
         <div className="text-[0.78rem] text-txt-muted">
           Connectors are registered in the desktop catalog (
-          <code className="text-[0.72rem]">connectors.toml</code>). Storage
-          connectors can sync into Search my files; Gmail can send mail and
-          read messages you approve in chat.
+          <code className="text-[0.72rem]">connectors.toml</code>).           Storage connectors can sync into Search my files; Gmail and Telegram
+          can send and read messages you approve in chat.
         </div>
         {profile?.authProvider === "google" && !gmailConnected ? (
           <div className="text-[0.78rem] text-txt-muted mt-1">
@@ -148,7 +148,9 @@ export default function ConnectionsSettings() {
                   <Icon size={14} />
                 )}
                 {thisConnecting
-                  ? "Opening Google…"
+                  ? p.id === "telegram"
+                    ? "Connecting…"
+                    : "Opening Google…"
                   : `Connect ${p.displayName}`}
               </button>
             )}
