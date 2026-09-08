@@ -43,6 +43,9 @@ import { runCloudAwareToolLoop } from "./cloudNativeToolLoop";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
 import { useGmailStore } from "../../stores/gmailStore";
 import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore";
+import { looksLikeDriveRequest } from "./driveConnectIntent";
+import { useDriveStore } from "../../stores/driveStore";
+import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
 import { useChatModeStore } from "../../stores/chatModeStore";
 import { useArtifactStreamStore } from "../../stores/artifactStreamStore";
 import {
@@ -88,6 +91,18 @@ export async function handleSendTextChat(
       })
       .catch(() => {
         useGmailConnectPromptStore.getState().show();
+      });
+  }
+
+  if (looksLikeDriveRequest(text)) {
+    void useDriveStore
+      .getState()
+      .refresh()
+      .then((status) => {
+        if (!status.connected) useDriveConnectPromptStore.getState().show();
+      })
+      .catch(() => {
+        useDriveConnectPromptStore.getState().show();
       });
   }
 

@@ -405,6 +405,93 @@ export const GMAIL_READ_TOOL: CloudToolDefinition = {
   },
 };
 
+/** Search Google Drive — returns names, links, and metadata (confirm before run). */
+export const DRIVE_SEARCH_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "drive_search",
+    description:
+      "Search the user's connected Google Drive for files by name or content. " +
+      "Returns file names, open links (webViewLink), mime types, and modified times. " +
+      "The user must approve the search in NELA before it runs. " +
+      "Use when the user asks to find, locate, or link a Drive file. " +
+      "Always include webViewLink in your reply when present. Never invent Drive files.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search text (file name or keywords inside the file).",
+        },
+        max_results: {
+          type: "number",
+          description: "How many results to return (1–10). Default 5.",
+        },
+        purpose: {
+          type: "string",
+          description:
+            "Short reason shown on the allow card (e.g. “Find your Q3 budget spreadsheet”).",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+/** List recently modified Google Drive files. */
+export const DRIVE_LIST_RECENT_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "drive_list_recent",
+    description:
+      "List the user's recently modified Google Drive files with open links. " +
+      "The user must approve the request in NELA. " +
+      "Use for “what did I work on lately”, “recent Drive files”, etc.",
+    parameters: {
+      type: "object",
+      properties: {
+        max_results: {
+          type: "number",
+          description: "How many recent files (1–10). Default 5.",
+        },
+        purpose: {
+          type: "string",
+          description: "Short reason shown on the allow card.",
+        },
+      },
+      required: [],
+    },
+  },
+};
+
+/** Open / summarize one Drive file (metadata + truncated text when available). */
+export const DRIVE_GET_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "drive_get",
+    description:
+      "Fetch one Google Drive file by id: open link, metadata, and truncated text when extractable " +
+      "(Google Docs/Sheets, PDFs with selectable text, and plain-text files). Use after drive_search / drive_list_recent when the user " +
+      "wants a summary or details. The user must approve each fetch. " +
+      "Always cite webViewLink. If text is missing (scanned-image PDFs / binary), say so and still share the link.",
+    parameters: {
+      type: "object",
+      properties: {
+        file_id: {
+          type: "string",
+          description: "Drive file id from a previous search/recent result.",
+        },
+        purpose: {
+          type: "string",
+          description:
+            "Short reason shown on the allow card (e.g. “Summarize Project Plan.pdf”).",
+        },
+      },
+      required: ["file_id"],
+    },
+  },
+};
+
 export function buildCloudChatTools(options?: {
   webEnabled?: boolean;
   fileSearchEnabled?: boolean;
@@ -415,6 +502,8 @@ export function buildCloudChatTools(options?: {
   askFollowUpEnabled?: boolean;
   /** Gmail compose/send when the user has connected Gmail. */
   gmailEnabled?: boolean;
+  /** Google Drive search/recent/get when Drive is connected. */
+  driveEnabled?: boolean;
 }): CloudToolDefinition[] {
   const tools: CloudToolDefinition[] = [];
   if (options?.webEnabled) tools.push(WEB_SEARCH_TOOL, WEB_EXTRACT_TOOL);
@@ -424,6 +513,9 @@ export function buildCloudChatTools(options?: {
   if (options?.askFollowUpEnabled !== false) tools.push(ASK_FOLLOWUP_TOOL);
   if (options?.gmailEnabled) {
     tools.push(GMAIL_SEND_TOOL, GMAIL_READ_TOOL);
+  }
+  if (options?.driveEnabled) {
+    tools.push(DRIVE_SEARCH_TOOL, DRIVE_LIST_RECENT_TOOL, DRIVE_GET_TOOL);
   }
   return tools;
 }

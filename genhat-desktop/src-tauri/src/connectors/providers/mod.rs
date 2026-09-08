@@ -88,6 +88,38 @@ impl ConnectorBackend for GDriveBackend {
         .map_err(ConnectorError::io)
     }
 
+    fn account_status(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> Result<Option<crate::connectors::types::ConnectionInfo>, ConnectorError> {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| ConnectorError::io(e.to_string()))?;
+        let Ok(conn) = gdrive::resolve_gdrive_connection(&dir) else {
+            return Ok(None);
+        };
+        Ok(crate::connectors::connections::get(&dir, &conn).map_err(ConnectorError::io)?)
+    }
+
+    async fn disconnect_account(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> Result<(), ConnectorError> {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| ConnectorError::io(e.to_string()))?;
+        let list = crate::connectors::connections::list(&dir).map_err(ConnectorError::io)?;
+        for c in list.into_iter().filter(|c| c.provider_id == "gdrive") {
+            let _ = crate::connectors::credentials::remove(&dir, &c.id.0);
+            let _ = crate::connectors::connections::remove(&dir, &c.id);
+        }
+        Ok(())
+    }
+
     async fn list_children(
         &self,
         app_data: &Path,

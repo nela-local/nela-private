@@ -487,6 +487,10 @@ fn main() {
             app_lib::commands::gmail::gmail_disconnect,
             app_lib::commands::gmail::gmail_send,
             app_lib::commands::gmail::gmail_read,
+            app_lib::commands::drive::drive_status,
+            app_lib::commands::drive::drive_search,
+            app_lib::commands::drive::drive_list_recent,
+            app_lib::commands::drive::drive_get,
             // Cloud storage connectors (File Indexer mirrors)
             app_lib::commands::connectors::connectors_list_providers,
             app_lib::commands::connectors::connectors_list_connections,

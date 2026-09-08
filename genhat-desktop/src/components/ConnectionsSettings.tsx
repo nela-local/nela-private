@@ -38,7 +38,8 @@ export default function ConnectionsSettings() {
           Connectors are registered in the desktop catalog (
           <code className="text-[0.72rem]">connectors.toml</code>). Storage
           connectors can sync into Search my files; Gmail can send mail and
-          read messages you approve in chat.
+          read inbox messages you approve; Google Drive can search files, share
+          open links, and summarize Docs/Sheets you approve in chat.
         </div>
         {profile?.authProvider === "google" && !gmailConnected ? (
           <div className="text-[0.78rem] text-txt-muted mt-1">

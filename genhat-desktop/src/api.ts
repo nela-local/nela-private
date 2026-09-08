@@ -33,6 +33,9 @@ import type {
   GmailStatus,
   GmailSendResult,
   GmailReadResult,
+  DriveStatus,
+  DriveListResult,
+  DriveGetResult,
 } from "./types";
 import {
   llamaContextKey,
@@ -1441,6 +1444,34 @@ export const Api = {
     return invoke<GmailReadResult>("gmail_read", {
       maxResults: input?.maxResults ?? null,
       query: input?.query ?? null,
+    });
+  },
+
+  async driveStatus(): Promise<DriveStatus> {
+    return invoke<DriveStatus>("drive_status");
+  },
+
+  async driveSearch(input: {
+    query: string;
+    maxResults?: number;
+  }): Promise<DriveListResult> {
+    return invoke<DriveListResult>("drive_search", {
+      query: input.query,
+      maxResults: input.maxResults ?? null,
+    });
+  },
+
+  async driveListRecent(input?: {
+    maxResults?: number;
+  }): Promise<DriveListResult> {
+    return invoke<DriveListResult>("drive_list_recent", {
+      maxResults: input?.maxResults ?? null,
+    });
+  },
+
+  async driveGet(input: { fileId: string }): Promise<DriveGetResult> {
+    return invoke<DriveGetResult>("drive_get", {
+      fileId: input.fileId,
     });
   },
 };
