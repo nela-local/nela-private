@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, MessageCircle, X } from "lucide-react";
 import { useTelegramStore } from "../stores/telegramStore";
 import { useConnectorStore } from "../stores/connectorStore";
@@ -37,9 +38,18 @@ export default function TelegramConnectModal() {
         ? "Enter the login code"
         : "Two-step password";
 
-  return (
-    <div className="telegram-wizard" role="dialog" aria-label="Connect Telegram">
-      <div className="gmail-confirm telegram-wizard__card">
+  return createPortal(
+    <div
+      className="telegram-wizard"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Connect Telegram"
+      onClick={closeWizard}
+    >
+      <div
+        className="gmail-confirm telegram-wizard__card"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="gmail-confirm__header">
           <div className="gmail-confirm__title">
             <MessageCircle size={16} />
@@ -155,6 +165,7 @@ export default function TelegramConnectModal() {
           </>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

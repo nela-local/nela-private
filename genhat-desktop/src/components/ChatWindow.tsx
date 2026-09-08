@@ -26,7 +26,6 @@ import GmailConnectCard from "./GmailConnectCard";
 import TelegramConnectCard from "./TelegramConnectCard";
 import TelegramSendConfirmCard from "./TelegramSendConfirmCard";
 import TelegramReadConfirmCard from "./TelegramReadConfirmCard";
-import TelegramConnectModal from "./TelegramConnectModal";
 import DriveConnectCard from "./DriveConnectCard";
 import DriveAccessConfirmCard from "./DriveAccessConfirmCard";
 import { useGmailSendConfirmStore } from "../stores/gmailSendConfirmStore";
@@ -979,7 +978,6 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         <TelegramConnectCard />
         <TelegramSendConfirmCard />
         <TelegramReadConfirmCard />
-        <TelegramConnectModal />
         <DriveConnectCard />
         <DriveAccessConfirmCard />
 
