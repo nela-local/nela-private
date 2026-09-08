@@ -44,6 +44,8 @@ import { looksLikeEmailRequest } from "./gmailConnectIntent";
 import { looksLikeTelegramRequest } from "./telegramConnectIntent";
 import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore";
 import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromptStore";
+import { looksLikeDriveRequest } from "./driveConnectIntent";
+import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
 const MAX_CHART_PREP_ROUNDS = 6;
@@ -583,6 +585,42 @@ async function executeToolCall(
     };
   }
 
+  if (name === "drive_search") {
+    const { executeDriveSearch } = await import("./driveTools");
+    const result = await executeDriveSearch(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+    };
+  }
+
+  if (name === "drive_list_recent") {
+    const { executeDriveListRecent } = await import("./driveTools");
+    const result = await executeDriveListRecent(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+    };
+  }
+
+  if (name === "drive_get") {
+    const { executeDriveGet } = await import("./driveTools");
+    const result = await executeDriveGet(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+    };
+  }
+
   return {
     content: `Unknown tool: ${name}`,
     webSearchResult,
@@ -722,6 +760,12 @@ export async function runCloudNativeToolLoop(
   } catch {
     telegramEnabled = false;
   }
+  let driveEnabled = false;
+  try {
+    driveEnabled = Boolean((await Api.driveStatus()).connected);
+  } catch {
+    driveEnabled = false;
+  }
   const tools = buildCloudChatTools({
     webEnabled,
     fileSearchEnabled,
@@ -730,6 +774,7 @@ export async function runCloudNativeToolLoop(
     askFollowUpEnabled: true,
     gmailEnabled,
     telegramEnabled,
+    driveEnabled,
   });
 
   let messages = toCloudMessages(loopOpts.messages);
@@ -746,7 +791,21 @@ export async function runCloudNativeToolLoop(
   const hasTelegram = tools.some(
     (t) => t.function.name === "telegram_send" || t.function.name === "telegram_read"
   );
-  if (hasWebSearch || hasFileSearch || hasRenderChart || hasAskFollowUp || hasGmail || hasTelegram) {
+  const hasDrive = tools.some(
+    (t) =>
+      t.function.name === "drive_search" ||
+      t.function.name === "drive_list_recent" ||
+      t.function.name === "drive_get"
+  );
+  if (
+    hasWebSearch ||
+    hasFileSearch ||
+    hasRenderChart ||
+    hasAskFollowUp ||
+    hasGmail ||
+    hasTelegram ||
+    hasDrive
+  ) {
     const parts: string[] = [];
     if (hasWebSearch) {
       parts.push(
@@ -832,6 +891,32 @@ export async function runCloudNativeToolLoop(
         parts.push(
           "Telegram is not connected. Tell the user to tap Connect Telegram on the card in chat " +
             "(or Settings → Connections). Never claim a Telegram message was sent or read."
+        );
+      }
+    }
+    if (hasDrive) {
+      parts.push(
+        "You can use Google Drive tools when connected: " +
+          "drive_search (query, optional max_results, purpose) to find files and get open links; " +
+          "drive_list_recent for recently modified files; " +
+          "drive_get (file_id, purpose) to fetch metadata + truncated text for Docs/Sheets/PDFs/plain text and summarize. " +
+          "Always include webViewLink in your reply when the tool returns it. " +
+          "The user must Allow once before each Drive access. " +
+          "Never invent Drive files. If text is missing (scanned-image PDFs / binary), still share the link and say content wasn’t extractable. " +
+          "If needsReauth or ok=false, ask them to reconnect Google Drive in Settings → Connections."
+      );
+    } else {
+      const lastUser = [...messages]
+        .reverse()
+        .find((m) => m.role === "user");
+      const lastUserText = lastUser
+        ? flattenMessageContent(lastUser.content)
+        : "";
+      if (looksLikeDriveRequest(lastUserText)) {
+        useDriveConnectPromptStore.getState().show();
+        parts.push(
+          "Google Drive is not connected. Tell the user to tap Connect Drive on the card in chat " +
+            "(or Settings → Connections). Never invent Drive file links or contents."
         );
       }
     }

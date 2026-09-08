@@ -23,4 +23,5 @@ pub mod attachments;
 pub mod fileindexer_install;
 pub mod gmail;
 pub mod telegram;
+pub mod drive;
 pub mod connectors;

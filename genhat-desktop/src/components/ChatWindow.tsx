@@ -27,12 +27,16 @@ import TelegramConnectCard from "./TelegramConnectCard";
 import TelegramSendConfirmCard from "./TelegramSendConfirmCard";
 import TelegramReadConfirmCard from "./TelegramReadConfirmCard";
 import TelegramConnectModal from "./TelegramConnectModal";
+import DriveConnectCard from "./DriveConnectCard";
+import DriveAccessConfirmCard from "./DriveAccessConfirmCard";
 import { useGmailSendConfirmStore } from "../stores/gmailSendConfirmStore";
 import { useGmailReadConfirmStore } from "../stores/gmailReadConfirmStore";
 import { useGmailConnectPromptStore } from "../stores/gmailConnectPromptStore";
 import { useTelegramSendConfirmStore } from "../stores/telegramSendConfirmStore";
 import { useTelegramReadConfirmStore } from "../stores/telegramReadConfirmStore";
 import { useTelegramConnectPromptStore } from "../stores/telegramConnectPromptStore";
+import { useDriveAccessConfirmStore } from "../stores/driveAccessConfirmStore";
+import { useDriveConnectPromptStore } from "../stores/driveConnectPromptStore";
 import ReasoningDisclosure from "./ReasoningDisclosure";
 import { scrubChatArtifactProtocol } from "../app/streamArtifactParser";
 import "./ModeBanner.css";
@@ -170,6 +174,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const telegramConfirmPending = useTelegramSendConfirmStore((s) => s.pending);
   const telegramReadConfirmPending = useTelegramReadConfirmStore((s) => s.pending);
   const telegramConnectPrompt = useTelegramConnectPromptStore((s) => s.visible);
+  const driveAccessPending = useDriveAccessConfirmStore((s) => s.pending);
+  const driveConnectPrompt = useDriveConnectPromptStore((s) => s.visible);
 
   useEffect(() => {
     void refreshConnectors();
@@ -239,13 +245,13 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   useEffect(() => {
     // Follow the live bubble while tokens stream. While only thinking/loading,
     // respect the user if they scrolled up to read history.
-    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !telegramConfirmPending && !telegramReadConfirmPending && !telegramConnectPrompt && !stickToBottomRef.current) return;
+    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !telegramConfirmPending && !telegramReadConfirmPending && !telegramConnectPrompt && !driveAccessPending && !driveConnectPrompt && !stickToBottomRef.current) return;
     const el = messagesParentRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt, telegramConfirmPending, telegramReadConfirmPending, telegramConnectPrompt]);
+  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt, telegramConfirmPending, telegramReadConfirmPending, telegramConnectPrompt, driveAccessPending, driveConnectPrompt]);
 
   // Close composer menus while a response is generating.
   if (isLoading && (showAttachMenu || showToolsMenu)) {
@@ -974,6 +980,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         <TelegramSendConfirmCard />
         <TelegramReadConfirmCard />
         <TelegramConnectModal />
+        <DriveConnectCard />
+        <DriveAccessConfirmCard />
 
         {isLoading &&
           !messages.some(

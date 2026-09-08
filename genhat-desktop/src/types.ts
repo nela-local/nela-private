@@ -798,6 +798,39 @@ export interface TelegramReadResult {
   reason?: string | null;
 }
 
+export interface DriveStatus {
+  connected: boolean;
+  connectionId?: string | null;
+  email?: string | null;
+}
+
+export interface DriveFileHit {
+  id: string;
+  name: string;
+  mimeType?: string | null;
+  size?: number | null;
+  modifiedAt?: string | null;
+  webViewLink?: string | null;
+  iconLink?: string | null;
+  owner?: string | null;
+  text?: string | null;
+  textTruncated?: boolean | null;
+}
+
+export interface DriveListResult {
+  ok: boolean;
+  files?: DriveFileHit[] | null;
+  reason?: string | null;
+  needsReauth?: boolean | null;
+}
+
+export interface DriveGetResult {
+  ok: boolean;
+  file?: DriveFileHit | null;
+  reason?: string | null;
+  needsReauth?: boolean | null;
+}
+
 export interface DevicePollPendingResponse {
   status: "pending";
 }

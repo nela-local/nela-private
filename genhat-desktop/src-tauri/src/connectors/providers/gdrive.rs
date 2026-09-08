@@ -8,7 +8,7 @@ use crate::connectors::oauth_client;
 use crate::connectors::types::{
     ConnectionId, EntryKind, RemoteEntry, RemoteId, SyncReport,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -27,6 +27,16 @@ struct DriveFile {
     size: Option<String>,
     modified_time: Option<String>,
     md5_checksum: Option<String>,
+    web_view_link: Option<String>,
+    icon_link: Option<String>,
+    owners: Option<Vec<DriveOwner>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveOwner {
+    display_name: Option<String>,
+    email_address: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +44,97 @@ struct DriveFile {
 struct ListResponse {
     files: Option<Vec<DriveFile>>,
     next_page_token: Option<String>,
+}
+
+/// Chat-facing Drive file hit (search / recent / get).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileHit {
+    pub id: String,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub size: Option<u64>,
+    pub modified_at: Option<String>,
+    pub web_view_link: Option<String>,
+    pub icon_link: Option<String>,
+    pub owner: Option<String>,
+    /// Truncated plain text when available (for summarization).
+    pub text: Option<String>,
+    pub text_truncated: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveListResult {
+    pub ok: bool,
+    pub files: Option<Vec<DriveFileHit>>,
+    pub reason: Option<String>,
+    pub needs_reauth: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveGetResult {
+    pub ok: bool,
+    pub file: Option<DriveFileHit>,
+    pub reason: Option<String>,
+    pub needs_reauth: Option<bool>,
+}
+
+const MAX_CHAT_FILES: usize = 10;
+const MAX_TEXT_CHARS: usize = 12_000;
+const MAX_DOWNLOAD_BYTES: usize = 2_000_000;
+/// PDFs can be larger; still cap so chat summarization stays responsive.
+const MAX_PDF_DOWNLOAD_BYTES: usize = 15_000_000;
+
+fn truncate_chars(s: &str, max: usize) -> (String, bool) {
+    let count = s.chars().count();
+    if count <= max {
+        return (s.to_string(), false);
+    }
+    let truncated: String = s.chars().take(max).collect();
+    (format!("{truncated}…"), true)
+}
+
+fn escape_drive_literal(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn owner_label(file: &DriveFile) -> Option<String> {
+    let owners = file.owners.as_ref()?;
+    let first = owners.first()?;
+    first
+        .display_name
+        .clone()
+        .or_else(|| first.email_address.clone())
+}
+
+fn to_hit(file: &DriveFile, text: Option<(String, bool)>) -> DriveFileHit {
+    let size = file.size.as_ref().and_then(|s| s.parse::<u64>().ok());
+    let (body, truncated) = match text {
+        Some((t, trunc)) => (Some(t), Some(trunc)),
+        None => (None, None),
+    };
+    DriveFileHit {
+        id: file.id.clone(),
+        name: file.name.clone(),
+        mime_type: file.mime_type.clone(),
+        size,
+        modified_at: file.modified_time.clone(),
+        web_view_link: file.web_view_link.clone(),
+        icon_link: file.icon_link.clone(),
+        owner: owner_label(file),
+        text: body,
+        text_truncated: truncated,
+    }
+}
+
+fn chat_fields() -> &'static str {
+    "nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum,webViewLink,iconLink,owners(displayName,emailAddress))"
+}
+
+fn file_fields() -> &'static str {
+    "id,name,mimeType,size,modifiedTime,md5Checksum,webViewLink,iconLink,owners(displayName,emailAddress)"
 }
 
 fn now_ms() -> i64 {
@@ -155,6 +256,82 @@ fn export_spec(mime: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// Prefer plain-text exports for chat summarization.
+fn text_export_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "application/vnd.google-apps.document" => Some("text/plain"),
+        "application/vnd.google-apps.spreadsheet" => Some("text/csv"),
+        "application/vnd.google-apps.presentation" => Some("text/plain"),
+        _ => None,
+    }
+}
+
+fn is_likely_text_mime(mime: &str) -> bool {
+    mime.starts_with("text/")
+        || mime == "application/json"
+        || mime == "application/xml"
+        || mime == "application/javascript"
+        || mime.ends_with("+json")
+        || mime.ends_with("+xml")
+}
+
+fn is_pdf_file(file: &DriveFile) -> bool {
+    let mime = file.mime_type.as_deref().unwrap_or("");
+    if mime.eq_ignore_ascii_case("application/pdf") {
+        return true;
+    }
+    file.name.to_ascii_lowercase().ends_with(".pdf")
+}
+
+/// Extract plain text from PDF bytes (same engine as RAG ingest). Soft-fails to None.
+fn extract_pdf_text_for_chat(bytes: &[u8]) -> Option<(String, bool)> {
+    let owned = bytes.to_vec();
+    let raw = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::extract_text_from_mem(&owned)
+    })) {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => {
+            log::warn!("Drive PDF extract failed: {e}");
+            return None;
+        }
+        Err(_) => {
+            log::warn!("Drive PDF extract panicked");
+            return None;
+        }
+    };
+
+    let mut cleaned = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '\u{FB00}' => cleaned.push_str("ff"),
+            '\u{FB01}' => cleaned.push_str("fi"),
+            '\u{FB02}' => cleaned.push_str("fl"),
+            '\u{FB03}' => cleaned.push_str("ffi"),
+            '\u{FB04}' => cleaned.push_str("ffl"),
+            '\u{00AD}' => {}
+            '\u{00A0}' => cleaned.push(' '),
+            '\u{2013}' | '\u{2014}' => cleaned.push('-'),
+            '\u{2026}' => cleaned.push_str("..."),
+            '\u{000C}' => cleaned.push_str("\n\n"),
+            '\u{FEFF}' | '\u{200B}' | '\u{200C}' | '\u{200D}' => {}
+            c if ('\u{F000}'..='\u{F8FF}').contains(&c) => {}
+            c if c.is_control() && c != '\n' && c != '\r' && c != '\t' => {}
+            other => cleaned.push(other),
+        }
+    }
+
+    let text = cleaned
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.chars().count() < 20 {
+        return None;
+    }
+    Some(truncate_chars(&text, MAX_TEXT_CHARS))
+}
+
 fn is_google_native(mime: &str) -> bool {
     mime.starts_with("application/vnd.google-apps.")
 }
@@ -214,7 +391,7 @@ async fn list_page(
         qp.append_pair("q", &q);
         qp.append_pair(
             "fields",
-            "nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum)",
+            "nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum,webViewLink,iconLink,owners(displayName,emailAddress))",
         );
         qp.append_pair("pageSize", "100");
         qp.append_pair("supportsAllDrives", "true");
@@ -323,8 +500,6 @@ struct FileSidecar {
     modified_at: Option<String>,
     mime_type: Option<String>,
 }
-
-use serde::Serialize;
 
 fn read_sidecar(path: &Path) -> Option<FileSidecar> {
     let raw = std::fs::read_to_string(sidecar_path(path)).ok()?;
@@ -491,7 +666,7 @@ pub async fn fetch_file(
     let token = access_token(app_data, conn).await?;
     let client = http_client()?;
     let url = format!(
-        "{DRIVE_API}/files/{}?fields=id,name,mimeType,size,modifiedTime,md5Checksum&supportsAllDrives=true",
+        "{DRIVE_API}/files/{}?fields=id,name,mimeType,size,modifiedTime,md5Checksum,webViewLink,iconLink,owners(displayName,emailAddress)&supportsAllDrives=true",
         id.0
     );
     let value = drive_get_json(&client, &token, &url).await?;
@@ -668,3 +843,339 @@ pub fn store_new_connection(
     connections::upsert(app_data, info.clone())?;
     Ok(info)
 }
+
+/// Prefer an active Google Drive connection (Connected / Syncing).
+pub fn resolve_gdrive_connection(app_data: &Path) -> Result<ConnectionId, ConnectorError> {
+    let list = connections::list(app_data).map_err(ConnectorError::io)?;
+    let preferred = list.into_iter().find(|c| {
+        c.provider_id == "gdrive"
+            && matches!(
+                c.status,
+                crate::connectors::types::ConnectionStatus::Connected
+                    | crate::connectors::types::ConnectionStatus::Syncing
+            )
+    });
+    preferred
+        .map(|c| c.id)
+        .ok_or_else(|| ConnectorError::invalid("Google Drive is not connected.".to_string()))
+}
+
+fn map_drive_err(app_data: &Path, conn: &ConnectionId, err: ConnectorError) -> DriveListResult {
+    if err.code == "NEEDS_REAUTH" {
+        mark_reauth(app_data, conn);
+        return DriveListResult {
+            ok: false,
+            files: None,
+            reason: Some("Google Drive needs to be reconnected.".into()),
+            needs_reauth: Some(true),
+        };
+    }
+    DriveListResult {
+        ok: false,
+        files: None,
+        reason: Some(err.to_string()),
+        needs_reauth: None,
+    }
+}
+
+async fn list_query_page(
+    client: &reqwest::Client,
+    token: &str,
+    q: &str,
+    order_by: Option<&str>,
+    page_size: u32,
+) -> Result<Vec<DriveFile>, ConnectorError> {
+    let mut url = reqwest::Url::parse(&format!("{DRIVE_API}/files"))
+        .map_err(|e| ConnectorError::network(e.to_string()))?;
+    {
+        let mut qp = url.query_pairs_mut();
+        qp.append_pair("q", q);
+        qp.append_pair("fields", chat_fields());
+        qp.append_pair("pageSize", &page_size.to_string());
+        qp.append_pair("supportsAllDrives", "true");
+        qp.append_pair("includeItemsFromAllDrives", "true");
+        if let Some(ob) = order_by {
+            qp.append_pair("orderBy", ob);
+        }
+    }
+    let value = drive_get_json(client, token, url.as_str()).await?;
+    let parsed: ListResponse =
+        serde_json::from_value(value).map_err(|e| ConnectorError::network(e.to_string()))?;
+    Ok(parsed.files.unwrap_or_default())
+}
+
+async fn download_text_for_chat(
+    client: &reqwest::Client,
+    token: &str,
+    file: &DriveFile,
+) -> Result<Option<(String, bool)>, ConnectorError> {
+    let mime = file.mime_type.as_deref().unwrap_or("");
+    if mime == FOLDER_MIME {
+        return Ok(None);
+    }
+
+    let is_pdf = is_pdf_file(file);
+    let url = if let Some(export_mime) = text_export_mime(mime) {
+        format!(
+            "{DRIVE_API}/files/{}/export?mimeType={}",
+            file.id,
+            urlencoding_lite(export_mime)
+        )
+    } else if is_google_native(mime) {
+        return Ok(None);
+    } else if is_pdf || is_likely_text_mime(mime) {
+        format!("{DRIVE_API}/files/{}?alt=media", file.id)
+    } else {
+        return Ok(None);
+    };
+
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| ConnectorError::network(e.to_string()))?;
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(ConnectorError::needs_reauth());
+    }
+    if !status.is_success() {
+        // Soft-fail: still return metadata + link without text.
+        log::warn!("Drive text export failed {status} for {}", file.id);
+        return Ok(None);
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| ConnectorError::network(e.to_string()))?;
+
+    if is_pdf {
+        let max = MAX_PDF_DOWNLOAD_BYTES;
+        if bytes.len() > max {
+            log::warn!(
+                "Drive PDF too large for chat extract ({} bytes > {max})",
+                bytes.len()
+            );
+            // Still try first chunk — many PDFs put readable text early.
+            return Ok(extract_pdf_text_for_chat(&bytes[..max]));
+        }
+        return Ok(extract_pdf_text_for_chat(&bytes));
+    }
+
+    if bytes.len() > MAX_DOWNLOAD_BYTES {
+        let slice = &bytes[..MAX_DOWNLOAD_BYTES];
+        let lossy = String::from_utf8_lossy(slice);
+        let (text, _) = truncate_chars(&lossy, MAX_TEXT_CHARS);
+        return Ok(Some((text, true)));
+    }
+    let lossy = String::from_utf8_lossy(&bytes);
+    if lossy.chars().filter(|c| *c == '\u{FFFD}').count() > 40 {
+        return Ok(None);
+    }
+    Ok(Some(truncate_chars(&lossy, MAX_TEXT_CHARS)))
+}
+
+/// Search Drive by name / fullText. Returns links suitable for chat.
+pub async fn search_files(
+    app_data: &Path,
+    query: &str,
+    max_results: Option<u32>,
+) -> DriveListResult {
+    let conn = match resolve_gdrive_connection(app_data) {
+        Ok(c) => c,
+        Err(e) => {
+            return DriveListResult {
+                ok: false,
+                files: None,
+                reason: Some(e.to_string()),
+                needs_reauth: None,
+            };
+        }
+    };
+    let q = query.trim();
+    if q.is_empty() {
+        return DriveListResult {
+            ok: false,
+            files: None,
+            reason: Some("Search query is empty.".into()),
+            needs_reauth: None,
+        };
+    }
+    let limit = max_results
+        .unwrap_or(5)
+        .clamp(1, MAX_CHAT_FILES as u32) as usize;
+    let lit = escape_drive_literal(q);
+    let drive_q = format!(
+        "trashed = false and mimeType != '{FOLDER_MIME}' and (name contains '{lit}' or fullText contains '{lit}')"
+    );
+
+    let token = match access_token(app_data, &conn).await {
+        Ok(t) => t,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+    let client = match http_client() {
+        Ok(c) => c,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+    let files = match list_query_page(&client, &token, &drive_q, Some("modifiedTime desc"), limit as u32)
+        .await
+    {
+        Ok(f) => f,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+
+    let hits: Vec<DriveFileHit> = files.iter().take(limit).map(|f| to_hit(f, None)).collect();
+    DriveListResult {
+        ok: true,
+        files: Some(hits),
+        reason: None,
+        needs_reauth: None,
+    }
+}
+
+/// List recently modified Drive files (excluding folders).
+pub async fn list_recent(app_data: &Path, max_results: Option<u32>) -> DriveListResult {
+    let conn = match resolve_gdrive_connection(app_data) {
+        Ok(c) => c,
+        Err(e) => {
+            return DriveListResult {
+                ok: false,
+                files: None,
+                reason: Some(e.to_string()),
+                needs_reauth: None,
+            };
+        }
+    };
+    let limit = max_results
+        .unwrap_or(5)
+        .clamp(1, MAX_CHAT_FILES as u32) as usize;
+    let drive_q = format!("trashed = false and mimeType != '{FOLDER_MIME}'");
+
+    let token = match access_token(app_data, &conn).await {
+        Ok(t) => t,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+    let client = match http_client() {
+        Ok(c) => c,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+    let files = match list_query_page(
+        &client,
+        &token,
+        &drive_q,
+        Some("modifiedTime desc"),
+        limit as u32,
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => return map_drive_err(app_data, &conn, e),
+    };
+
+    let hits: Vec<DriveFileHit> = files.iter().take(limit).map(|f| to_hit(f, None)).collect();
+    DriveListResult {
+        ok: true,
+        files: Some(hits),
+        reason: None,
+        needs_reauth: None,
+    }
+}
+
+/// Fetch one file’s metadata, open link, and truncated text when extractable.
+pub async fn get_file_for_chat(app_data: &Path, file_id: &str) -> DriveGetResult {
+    let conn = match resolve_gdrive_connection(app_data) {
+        Ok(c) => c,
+        Err(e) => {
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: Some(e.to_string()),
+                needs_reauth: None,
+            };
+        }
+    };
+    let id = file_id.trim();
+    if id.is_empty() {
+        return DriveGetResult {
+            ok: false,
+            file: None,
+            reason: Some("file_id is required.".into()),
+            needs_reauth: None,
+        };
+    }
+
+    let token = match access_token(app_data, &conn).await {
+        Ok(t) => t,
+        Err(e) => {
+            let list = map_drive_err(app_data, &conn, e);
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: list.reason,
+                needs_reauth: list.needs_reauth,
+            };
+        }
+    };
+    let client = match http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: Some(e.to_string()),
+                needs_reauth: None,
+            };
+        }
+    };
+
+    let url = format!(
+        "{DRIVE_API}/files/{}?fields={}&supportsAllDrives=true",
+        urlencoding_lite(id),
+        urlencoding_lite(file_fields())
+    );
+    let value = match drive_get_json(&client, &token, &url).await {
+        Ok(v) => v,
+        Err(e) => {
+            let list = map_drive_err(app_data, &conn, e);
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: list.reason,
+                needs_reauth: list.needs_reauth,
+            };
+        }
+    };
+    let file: DriveFile = match serde_json::from_value(value) {
+        Ok(f) => f,
+        Err(e) => {
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: Some(e.to_string()),
+                needs_reauth: None,
+            };
+        }
+    };
+
+    let text = match download_text_for_chat(&client, &token, &file).await {
+        Ok(t) => t,
+        Err(e) if e.code == "NEEDS_REAUTH" => {
+            mark_reauth(app_data, &conn);
+            return DriveGetResult {
+                ok: false,
+                file: None,
+                reason: Some("Google Drive needs to be reconnected.".into()),
+                needs_reauth: Some(true),
+            };
+        }
+        Err(_) => None,
+    };
+
+    DriveGetResult {
+        ok: true,
+        file: Some(to_hit(&file, text)),
+        reason: None,
+        needs_reauth: None,
+    }
+}
+
