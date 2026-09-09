@@ -14,10 +14,10 @@ import GenerationProgressLabel from "./GenerationProgressLabel";
 import WebSearchDisclosure from "./WebSearchDisclosure";
 import type { PipelineStageKind } from "./ProgressSlate";
 import { scrubChatArtifactProtocol } from "../app/streamArtifactParser";
-import { useChatModeStore } from "../stores/chatModeStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useCloudStore } from "../stores/cloudStore";
 import ReasoningDisclosure from "./ReasoningDisclosure";
+import { useNelaLogoSrc } from "../hooks/useTheme";
 
 function modelHoverLabel(
   model: string,
@@ -52,28 +52,6 @@ function looksLikeArtifactDump(text: string): boolean {
     /^<\/?[a-zA-Z!]/.test(scrubbed)
   );
 }
-
-const GenerationTimer = memo(function GenerationTimer({
-  active,
-  mode,
-  stage,
-}: {
-  active: boolean;
-  mode: "artifact" | "chat" | "vision" | "rag" | "mindmap";
-  stage?: PipelineStageKind | null;
-}) {
-  const elapsedSec = useChatModeStore((s) => s.generalElapsedTime);
-  return (
-    <GenerationProgressLabel
-      active={active}
-      mode={mode}
-      elapsedSec={elapsedSec}
-      stage={stage}
-    />
-  );
-});
-
-export { GenerationTimer };
 
 /** Copy button for a chat message (prompt or response) */
 const CopyMsgButton: React.FC<{ text: string; label?: string }> = ({
@@ -288,6 +266,7 @@ function ChatMessageItemInner({
 }: ChatMessageItemProps) {
   const updateSession = useSessionStore((s) => s.updateSession);
   const entitlement = useCloudStore((s) => s.entitlement);
+  const logoSrc = useNelaLogoSrc();
   const canRetry = Boolean(retryText?.trim()) && !isLoading && Boolean(onRetry);
   const runRetry = () => {
     if (!canRetry || !onRetry) return;
@@ -355,7 +334,7 @@ function ChatMessageItemInner({
                 ) : (
                   <>
                     <img
-                      src="/logo-dark.png"
+                      src={logoSrc}
                       alt="NELA"
                       className="w-8 h-8 rounded-xl object-contain shrink-0"
                       draggable={false}
@@ -435,20 +414,7 @@ function ChatMessageItemInner({
                                           <span>{liveToolStatus}</span>
                                         </div>
                                       )}
-                                      {isLast ? (
-                                        <GenerationTimer
-                                          active
-                                          mode="artifact"
-                                          stage={stage}
-                                        />
-                                      ) : (
-                                        <GenerationProgressLabel
-                                          active
-                                          mode="artifact"
-                                          elapsedSec={0}
-                                          stage={stage}
-                                        />
-                                      )}
+                                      <GenerationProgressLabel active />
                                     </div>
                                   )}
                                   {showIntroMarkdown ? (

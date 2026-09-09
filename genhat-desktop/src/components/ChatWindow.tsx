@@ -14,12 +14,12 @@ import { useAdvancedMode } from "../hooks/useAdvancedMode";
 import { useSlashCommandInput } from "../hooks/useSlashCommandInput";
 import SlashCommandMenu from "./SlashCommandMenu";
 import { SlashHighlightedText } from "./SlashHighlightedText";
-import type { GenerationProgressMode } from "../app/generationProgress";
 import { useCloudStore } from "../stores/cloudStore";
 import { useChatModeStore } from "../stores/chatModeStore";
 import { useArtifactStreamStore } from "../stores/artifactStreamStore";
 import { useConnectorStore } from "../stores/connectorStore";
-import ChatMessageItem, { GenerationTimer } from "./ChatMessageItem";
+import ChatMessageItem from "./ChatMessageItem";
+import NelaLoadingIcon from "./NelaLoadingIcon";
 import GmailSendConfirmCard from "./GmailSendConfirmCard";
 import GmailReadConfirmCard from "./GmailReadConfirmCard";
 import GmailConnectCard from "./GmailConnectCard";
@@ -38,15 +38,9 @@ import { useDriveAccessConfirmStore } from "../stores/driveAccessConfirmStore";
 import { useDriveConnectPromptStore } from "../stores/driveConnectPromptStore";
 import ReasoningDisclosure from "./ReasoningDisclosure";
 import { scrubChatArtifactProtocol } from "../app/streamArtifactParser";
+import { useNelaLogoSrc } from "../hooks/useTheme";
 import "./ModeBanner.css";
 import "./WebSearchDisclosure.css";
-
-function chatModeToProgressMode(mode: string): GenerationProgressMode {
-  if (mode === "vision") return "vision";
-  if (mode === "rag") return "rag";
-  if (mode === "mindmap") return "mindmap";
-  return "chat";
-}
 
 function looksLikeArtifactDump(text: string): boolean {
   // Scrub protocol leaks first — a single bad tag line must not hide a useful reply.
@@ -175,6 +169,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const telegramConnectPrompt = useTelegramConnectPromptStore((s) => s.visible);
   const driveAccessPending = useDriveAccessConfirmStore((s) => s.pending);
   const driveConnectPrompt = useDriveConnectPromptStore((s) => s.visible);
+  const logoSrc = useNelaLogoSrc();
 
   useEffect(() => {
     void refreshConnectors();
@@ -758,7 +753,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         {/* Brand & Greeting */}
         <div className="relative z-10 flex flex-col items-center mb-8">
           <img
-            src="/logo-dark.png"
+            src={logoSrc}
             alt="NELA"
             className="w-14 h-14 rounded-2xl object-contain mb-4"
             draggable={false}
@@ -988,41 +983,41 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
               m.artifactStage !== "LivePreview" &&
               m.artifactStage !== "Error"
           ) && (
-          <div className="flex gap-3 mb-5 max-w-3xl mx-auto">
-            <img
-              src="/logo-dark.png"
-              alt="NELA"
-              className="w-8 h-8 rounded-xl object-contain shrink-0 shadow-[0_2px_10px_rgba(0,212,255,0.2)]"
-              draggable={false}
-            />
-            <div className="flex-1 min-w-0 text-[0.9rem] leading-relaxed text-txt glass rounded-2xl rounded-tl-sm py-3 px-4">
-              {liveToolStatus && (
-                <div className="web-search-live" role="status">
-                  <span className="web-search-live__pulse" aria-hidden />
-                  <span>{liveToolStatus}</span>
-                </div>
-              )}
-              {streamingThinking.trim() ? (
-                <ReasoningDisclosure thinking={streamingThinking} streaming />
-              ) : null}
-              {streamingContent && !looksLikeArtifactDump(streamingContent) ? (
-                <MarkdownRenderer
-                  content={scrubChatArtifactProtocol(streamingContent)}
-                  streaming
-                />
-              ) : !streamingThinking.trim() ? (
-                !liveToolStatus || looksLikeArtifactDump(streamingContent) ? (
-                  <GenerationTimer
-                    active
-                    mode={
-                      session?.artifactStreamActive
-                        ? "artifact"
-                        : chatModeToProgressMode(chatMode)
-                    }
+          <div className="flex gap-3 mb-5 max-w-3xl mx-auto items-start">
+            <NelaLoadingIcon size={32} className="shrink-0" />
+            {liveToolStatus ||
+            streamingThinking.trim() ||
+            (streamingContent && !looksLikeArtifactDump(streamingContent)) ? (
+              <div className="flex-1 min-w-0 text-[0.9rem] leading-relaxed text-txt glass rounded-2xl rounded-tl-sm py-3 px-4">
+                {liveToolStatus && (
+                  <div className="web-search-live" role="status">
+                    <span className="web-search-live__pulse" aria-hidden />
+                    <span>{liveToolStatus}</span>
+                  </div>
+                )}
+                {streamingThinking.trim() ? (
+                  <ReasoningDisclosure thinking={streamingThinking} streaming />
+                ) : null}
+                {streamingContent && !looksLikeArtifactDump(streamingContent) ? (
+                  <MarkdownRenderer
+                    content={scrubChatArtifactProtocol(streamingContent)}
+                    streaming
                   />
-                ) : null
-              ) : null}
-            </div>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                className="glass rounded-2xl rounded-tl-sm py-3 px-4 w-fit"
+                role="status"
+                aria-label="NELA is typing"
+              >
+                <div className="typing-dots flex gap-1.5 items-center h-5">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -46,7 +46,6 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [exporting, setExporting] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [stageElapsedSec, setStageElapsedSec] = useState(0);
   const [isPresentationHtml, setIsPresentationHtml] = useState(false);
 
   const [spreadsheetData, setSpreadsheetData] = useState<{ sheetName: string; rows: string[][] } | null>(null);
@@ -64,18 +63,6 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
   useEffect(() => {
     setCurrentPath(artifactPath ?? null);
   }, [artifactPath]);
-
-  useEffect(() => {
-    if (stage === "LivePreview" || stage === "Error") {
-      setStageElapsedSec(0);
-      return;
-    }
-    const started = Date.now();
-    const tick = () => setStageElapsedSec((Date.now() - started) / 1000);
-    tick();
-    const interval = setInterval(tick, 500);
-    return () => clearInterval(interval);
-  }, [stage]);
 
   // Diff-patch hot reload function
   const applyPatch = useCallback((patch: string) => {
@@ -297,12 +284,7 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
           <span className="text-xl leading-none">{stageInfo.icon}</span>
           <div className="flex-1 min-w-0">
             <div className="text-[0.84rem] font-semibold text-txt">{stageInfo.label}</div>
-            <GenerationProgressLabel
-              active
-              mode="artifact"
-              elapsedSec={stageElapsedSec}
-              stage={stage}
-            />
+            <GenerationProgressLabel active />
           </div>
         </div>
 

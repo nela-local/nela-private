@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Plus, FileUp, Sparkles } from "lucide-react";
+import { useNelaLogoSrc } from "../hooks/useTheme";
 import "./StartupModal.css";
 
 interface StartupModalProps {
@@ -61,6 +62,7 @@ const StartupModal: React.FC<StartupModalProps> = ({
   busy = false,
 }) => {
   const [elapsedTime, setElapsedTime] = useState(0);
+  const logoSrc = useNelaLogoSrc();
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -93,9 +95,9 @@ const StartupModal: React.FC<StartupModalProps> = ({
         <div className="startup-hero">
           <div className="startup-top-row">
             <div className="startup-brand">
-              <img src="/logo-dark.png" alt="Nela" className="startup-logo-img" />
+              <img src={logoSrc} alt="Nela" className="startup-logo-img" />
               <div className="startup-brand-copy">
-                <h1 className="startup-title">Nela</h1>
+                <h1 className="startup-title">NELA</h1>
                 <p className="startup-subtitle">Your private AI workspace — local or Cloud</p>
               </div>
             </div>

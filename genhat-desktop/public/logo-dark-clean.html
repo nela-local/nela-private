@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clean animated logo</title>
+<style>
+  html,body{margin:0;padding:0;background:transparent;width:100%;height:100%;overflow:hidden;}
+  #stage{position:relative;width:449px;height:555px;overflow:hidden;background:transparent;}
+  #animation{display:block;width:449px;height:555px;border:0;outline:none;}
+  /* Opaque patch over SVGator watermark pixels — color set to match host UI bg. */
+  #watermark-cover{
+    position:absolute;
+    left:286px;
+    top:482px;
+    width:158px;
+    height:59px;
+    background:#08080c;
+    z-index:2;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <object id="animation" data="logo-dark.svg" type="image/svg+xml"></object>
+  <div id="watermark-cover" aria-hidden="true"></div>
+</div>
+<script>
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var cover = params.get("cover");
+    if (!cover) return;
+    // Allow hex / rgb / rgba only — ignore anything else.
+    if (!/^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([\d\s.,%]+\))$/i.test(cover.trim())) return;
+    document.getElementById("watermark-cover").style.background = cover.trim();
+  })();
+</script>
+</body>
+</html>

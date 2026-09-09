@@ -6,6 +6,7 @@ import {
   type GmailDraft,
 } from "../stores/gmailSendConfirmStore";
 import { extractEmails } from "../app/send/gmailSend";
+import { useNelaLogoSrc } from "../hooks/useTheme";
 import "./GmailSendConfirmCard.css";
 
 function listToInput(list: string[]): string {
@@ -18,6 +19,7 @@ function inputToList(value: string): string[] {
 
 export default function GmailSendConfirmCard() {
   const pending = useGmailSendConfirmStore((s) => s.pending);
+  const logoSrc = useNelaLogoSrc();
   const [draft, setDraft] = useState<GmailDraft | null>(null);
   const [toInput, setToInput] = useState("");
   const [ccInput, setCcInput] = useState("");
@@ -122,7 +124,7 @@ export default function GmailSendConfirmCard() {
         />
       </label>
       <div className="gmail-confirm__nela-footer">
-        <img src="/logo-dark.png" alt="NELA" />
+        <img src={logoSrc} alt="NELA" />
         <em>This message was sent using nela</em>
       </div>
       <div className="gmail-confirm__actions">
