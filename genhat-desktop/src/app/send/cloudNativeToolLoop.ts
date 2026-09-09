@@ -16,10 +16,12 @@ import type {
   ArtifactResult,
 } from "../../types";
 import {
+  canAttemptCloud,
   formatCloudFallbackNotice,
   streamChatByMode,
   willRouteToCloud,
 } from "./cloudOrLocalStream";
+import { cloudQualityModeForIntelligence } from "../intelligenceModes";
 import { buildCloudChatTools } from "./cloudTools";
 import { groundWebSearchQuery } from "./followUpSearchQuery";
 import { mergeWebSearchResults, runWebSearchToolLoop } from "./webSearchToolLoop";
@@ -31,6 +33,7 @@ import {
   MAX_WEB_SEARCH_TOOL_ROUNDS,
 } from "./webSearchLimits";
 import { useModelStore } from "../../stores/modelStore";
+import { useCloudStore } from "../../stores/cloudStore";
 import {
   ArtifactChartPool,
   embedPoolChartsInHtml,
@@ -678,10 +681,60 @@ async function executeToolCallsParallel(
 export async function runCloudAwareToolLoop(
   opts: CloudNativeToolLoopOptions
 ): Promise<CloudNativeToolLoopResult> {
-  const useCloud = willRouteToCloud({
+  let useCloud = willRouteToCloud({
     containsFileContext: opts.containsFileContext,
     userConfirmedCloudContext: opts.userConfirmedCloudContext,
   });
+
+  // Gmail / Telegram / Drive tools only exist on the cloud tools[] loop.
+  // If this turn needs them, prefer cloud when the user isn't locked to Local.
+  const lastUser = [...opts.messages].reverse().find((m) => m.role === "user");
+  const lastUserText = lastUser
+    ? typeof lastUser.content === "string"
+      ? lastUser.content
+      : flattenMessageContent(lastUser.content as CloudChatMessage["content"])
+    : "";
+  let needsConnectors = false;
+  try {
+    if (
+      looksLikeEmailRequest(lastUserText) &&
+      (await Api.gmailStatus()).connected
+    ) {
+      needsConnectors = true;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (
+      looksLikeTelegramRequest(lastUserText) &&
+      (await Api.telegramStatus()).connected
+    ) {
+      needsConnectors = true;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (
+      looksLikeDriveRequest(lastUserText) &&
+      (await Api.driveStatus()).connected
+    ) {
+      needsConnectors = true;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (needsConnectors && !useCloud) {
+    const preferredMode = useCloudStore.getState().preferredMode;
+    const mode = cloudQualityModeForIntelligence(
+      useModelStore.getState().intelligenceMode
+    );
+    if (preferredMode !== "local" && canAttemptCloud(mode)) {
+      useCloud = true;
+    }
+  }
 
   const runLocal = async (notice?: string) => {
     let noticeSent = false;
@@ -719,6 +772,11 @@ export async function runCloudAwareToolLoop(
   };
 
   if (!useCloud) {
+    if (needsConnectors) {
+      return runLocal(
+        "*Gmail and other connectors need NELA Cloud (not Local-only mode). Switch the mode to Auto or Cloud, then ask again.*\n\n"
+      );
+    }
     return runLocal();
   }
 

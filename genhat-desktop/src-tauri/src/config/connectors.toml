@@ -13,8 +13,8 @@
 #
 # auth_kind: oauth2 | api_key | mtproto | none
 # connect_flow:
-#   cloud_broker      — OAuth via nela-backend start/poll (legacy Drive)
-#   desktop_pkce      — on-device PKCE loopback (Gmail + Drive)
+#   cloud_broker      — OAuth via nela-backend start/poll (Gmail + Drive)
+#   desktop_pkce      — legacy on-device PKCE (unused for Google; secrets stay on API)
 #   telegram_mtproto  — phone + login code + optional 2FA (Telegram)
 #   none              — no OAuth
 #
@@ -35,7 +35,7 @@ category = "storage"
 status = "available"
 auth_kind = "oauth2"
 oauth = "google"
-connect_flow = "desktop_pkce"
+connect_flow = "cloud_broker"
 capabilities = ["browse", "sync", "fetch", "create", "update"]
 description = "Sync Drive folders into File Indexer for Search my files."
 show_in_attach_menu = true
@@ -47,9 +47,9 @@ category = "communication"
 status = "available"
 auth_kind = "oauth2"
 oauth = "google"
-connect_flow = "desktop_pkce"
+connect_flow = "cloud_broker"
 capabilities = ["send", "read"]
-description = "Send email from chat and read recent messages you approve. Sign-in uses on-device Google PKCE."
+description = "Send email from chat and read recent messages you approve. Sign-in is brokered by NELA Cloud (no secrets in the desktop app)."
 show_in_attach_menu = false
 
 [[connector]]

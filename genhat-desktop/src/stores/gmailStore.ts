@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { Api } from "../api";
 import type { GmailStatus } from "../types";
 import { useGmailConnectPromptStore } from "./gmailConnectPromptStore";
+import { useConnectorStore } from "./connectorStore";
 
 interface GmailState {
   connected: boolean;
@@ -55,7 +56,19 @@ export const useGmailStore = create<GmailState>((set) => ({
   connect: async () => {
     set({ loading: true, error: null });
     try {
-      const status = await Api.gmailOAuthStart();
+      // OAuth client secret stays on nela-backend — desktop only polls.
+      const connection = await useConnectorStore.getState().connectProvider("gmail");
+      if (!connection) {
+        const message =
+          useConnectorStore.getState().error || "Gmail sign-in did not complete.";
+        set({ loading: false, error: message });
+        throw new Error(message);
+      }
+      const status: GmailStatus = {
+        connected: true,
+        email: connection.accountEmail,
+        canRead: true,
+      };
       return applyStatus(set, status);
     } catch (err) {
       const message = errMessage(err, "Could not connect Gmail.");
@@ -68,6 +81,7 @@ export const useGmailStore = create<GmailState>((set) => ({
     set({ loading: true, error: null });
     try {
       await Api.gmailDisconnect();
+      await useConnectorStore.getState().refresh();
       set({ connected: false, email: null, loading: false, error: null });
     } catch (err) {
       const message = errMessage(err, "Could not disconnect Gmail.");

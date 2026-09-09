@@ -1,17 +1,14 @@
-//! Gmail connector: desktop PKCE OAuth (`gmail.send` + `gmail.readonly`) + MIME send/read.
+//! Gmail connector: send/read via Gmail API.
 //!
-//! Tokens live in `{app_data}/nela_gmail_tokens.json` (same pattern as Cloud).
-//! The OS keychain stores a compact refresh+email copy when it can.
-//! Distinct from NELA Cloud Google login.
+//! OAuth is brokered by nela-backend (`cloud_broker`); tokens live in
+//! `{app_data}/nela_gmail_tokens.json` (+ keychain when available).
 
 use base64::Engine;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const KEYRING_SERVICE: &str = "nela.connector.gmail";
 const KEYRING_USER: &str = "oauth";
@@ -28,15 +25,10 @@ pub fn set_app_data_dir(path: PathBuf) {
 fn app_data_dir() -> Option<PathBuf> {
     APP_DATA_DIR.lock().ok().and_then(|g| g.clone())
 }
-const GMAIL_SCOPES: &str = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly email";
-const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
-const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 const SEND_URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const LIST_URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 const READONLY_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
-const OAUTH_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_BODY_CHARS: usize = 100_000;
 const MAX_RECIPIENTS: usize = 25;
 const NELA_FOOTER_TEXT: &str = "This message was sent using nela";
@@ -110,22 +102,6 @@ pub struct GmailReadResult {
 }
 
 #[derive(Debug, Deserialize)]
-struct TokenResponse {
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-    expires_in: Option<u64>,
-    id_token: Option<String>,
-    scope: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UserInfo {
-    email: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct GmailSendApiResponse {
     id: Option<String>,
     error: Option<GmailApiError>,
@@ -134,10 +110,6 @@ struct GmailSendApiResponse {
 #[derive(Debug, Deserialize)]
 struct GmailApiError {
     message: Option<String>,
-}
-
-pub fn client_id() -> Result<String, String> {
-    crate::connectors::google_oauth::connector_client_id()
 }
 
 fn now_unix() -> u64 {
@@ -191,7 +163,6 @@ fn read_keychain_store() -> Option<StoredGmailTokens> {
 }
 
 fn write_keychain_store(store: &StoredGmailTokens) {
-    // Windows Credential Manager caps the blob (~2.5KB). Persist refresh+email only.
     let compact = StoredGmailTokens {
         refresh_token: store.refresh_token.clone(),
         access_token: None,
@@ -240,18 +211,6 @@ fn delete_store() {
     }
 }
 
-fn pkce_pair() -> (String, String) {
-    let raw = format!("{}{}", uuid::Uuid::new_v4().as_simple(), uuid::Uuid::new_v4().as_simple());
-    let verifier = raw.chars().take(64).collect::<String>();
-    let digest = Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    (verifier, challenge)
-}
-
-fn random_state() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
-
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -259,236 +218,15 @@ fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|_| "Could not start a network client.".to_string())
 }
 
-fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
-    for pair in query.split('&') {
-        let mut parts = pair.splitn(2, '=');
-        let key = parts.next().unwrap_or("");
-        let val = parts.next().unwrap_or("");
-        if key.is_empty() {
-            continue;
-        }
-        let decoded_key = urlencoding::decode(key).unwrap_or(std::borrow::Cow::Borrowed(key));
-        let decoded_val = urlencoding::decode(val).unwrap_or(std::borrow::Cow::Borrowed(val));
-        out.insert(decoded_key.into_owned(), decoded_val.into_owned());
-    }
-    out
-}
-
-async fn wait_for_oauth_redirect(
-    listener: tokio::net::TcpListener,
-    expected_state: &str,
-) -> Result<String, String> {
-    let outcome = tokio::time::timeout(OAUTH_TIMEOUT, async {
-        loop {
-            let (mut stream, _) = listener
-                .accept()
-                .await
-                .map_err(|_| "Gmail sign-in failed. Try Connect again.".to_string())?;
-
-            let mut buf = vec![0u8; 8192];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let first_line = req.lines().next().unwrap_or("");
-            let path = first_line.split_whitespace().nth(1).unwrap_or("/");
-            if path.starts_with("/favicon") {
-                let _ = stream
-                    .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
-                    .await;
-                continue;
-            }
-
-            let query = path.split_once('?').map(|(_, q)| q).unwrap_or("");
-            let params = parse_query(query);
-
-            if let Some(err) = params.get("error") {
-                let desc = params
-                    .get("error_description")
-                    .cloned()
-                    .unwrap_or_else(|| err.clone());
-                let body = html_page("Gmail not connected", "You can close this tab and return to NELA.");
-                let _ = write_http_ok(&mut stream, &body).await;
-                return Err(format!("Google returned an error: {desc}"));
-            }
-
-            let Some(code) = params.get("code").cloned().filter(|c| !c.is_empty()) else {
-                let _ = stream
-                    .write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
-                    .await;
-                continue;
-            };
-            let state = params.get("state").cloned().unwrap_or_default();
-            if state != expected_state {
-                let body = html_page(
-                    "Gmail not connected",
-                    "Sign-in state did not match. Try again from NELA.",
-                );
-                let _ = write_http_ok(&mut stream, &body).await;
-                return Err("Gmail sign-in could not be verified. Try Connect again.".to_string());
-            }
-
-            let body = html_page("Gmail connected", "You can close this tab and return to NELA.");
-            let _ = write_http_ok(&mut stream, &body).await;
-            return Ok(code);
-        }
-    })
-    .await
-    .map_err(|_| "Gmail sign-in timed out. Try Connect again.".to_string())?;
-    outcome
-}
-
-fn html_page(title: &str, message: &str) -> String {
-    format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{title}</title></head>\
-<body style=\"font-family:system-ui,sans-serif;padding:2rem;max-width:36rem\">\
-<h2>{title}</h2><p>{message}</p></body></html>"
-    )
-}
-
-async fn write_http_ok(stream: &mut tokio::net::TcpStream, body: &str) -> std::io::Result<()> {
-    let resp = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(resp.as_bytes()).await
-}
-
-fn email_from_id_token(id_token: &str) -> Option<String> {
-    let payload = id_token.split('.').nth(1)?;
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload))
-        .ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    json.get("email")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-async fn fetch_email(client: &reqwest::Client, access_token: &str, id_token: Option<&str>) -> Option<String> {
-    if let Ok(resp) = client
-        .get(USERINFO_URL)
-        .bearer_auth(access_token)
-        .send()
-        .await
-    {
-        if let Ok(info) = resp.json::<UserInfo>().await {
-            if let Some(email) = info.email.filter(|e| !e.trim().is_empty()) {
-                return Some(email);
-            }
-        }
-    }
-    id_token.and_then(email_from_id_token)
-}
-
-async fn exchange_code(
-    client: &reqwest::Client,
-    client_id: &str,
-    code: &str,
-    verifier: &str,
-    redirect_uri: &str,
-) -> Result<StoredGmailTokens, String> {
-    let mut form = vec![
-        ("client_id", client_id.to_string()),
-        ("code", code.to_string()),
-        ("code_verifier", verifier.to_string()),
-        ("grant_type", "authorization_code".to_string()),
-        ("redirect_uri", redirect_uri.to_string()),
-    ];
-    if let Some(secret) = crate::connectors::google_oauth::connector_client_secret() {
-        form.push(("client_secret", secret));
-    }
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&form)
-        .send()
-        .await
-        .map_err(|_| "Could not finish Gmail sign-in. Check your network and try again.".to_string())?;
-
-    let tokens: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|_| "Google returned an unexpected sign-in response.".to_string())?;
-    if let Some(err) = tokens.error {
-        let desc = tokens.error_description.unwrap_or(err);
-        if desc.to_lowercase().contains("client_secret") {
-            return Err(
-                "Google needs the Desktop client's secret. In Cloud Console open \
-Clients → your Desktop app, copy Client secret, add \
-NELA_GOOGLE_CONNECTOR_CLIENT_SECRET to genhat-desktop/.env, then restart NELA."
-                    .to_string(),
-            );
-        }
-        return Err(format!("Google sign-in failed: {desc}"));
-    }
-    let access = tokens
-        .access_token
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Google did not return an access token.".to_string())?;
-    let refresh = tokens
-        .refresh_token
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            "Google did not return a refresh token. Disconnect any prior NELA Gmail grant and try again."
-                .to_string()
-        })?;
-    let expires_at = tokens.expires_in.map(|secs| now_unix().saturating_add(secs));
-    let email = fetch_email(client, &access, tokens.id_token.as_deref()).await;
-    if let Some(exp) = expires_at {
-        if let Ok(mut guard) = ACCESS_CACHE.lock() {
-            *guard = Some(CachedAccess {
-                access_token: access.clone(),
-                expires_at: exp,
-                email: email.clone(),
-            });
-        }
-    }
-    Ok(StoredGmailTokens {
-        refresh_token: refresh,
-        access_token: Some(access),
-        expires_at,
-        email,
-        scopes: tokens.scope,
-    })
-}
-
 async fn refresh_access(store: &StoredGmailTokens) -> Result<(String, u64), String> {
-    let client_id = client_id()?;
-    let client = http_client()?;
-    let mut form = vec![
-        ("client_id", client_id),
-        ("refresh_token", store.refresh_token.clone()),
-        ("grant_type", "refresh_token".to_string()),
-    ];
-    if let Some(secret) = crate::connectors::google_oauth::connector_client_secret() {
-        form.push(("client_secret", secret));
-    }
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&form)
-        .send()
-        .await
-        .map_err(|_| "Could not refresh the Gmail session. Try Connect again.".to_string())?;
-    let tokens: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|_| "Google returned an unexpected refresh response.".to_string())?;
-    if let Some(err) = tokens.error {
-        delete_store();
-        let desc = tokens.error_description.unwrap_or(err);
-        return Err(format!("Gmail access expired ({desc}). Connect Gmail again."));
-    }
-    let access = tokens
-        .access_token
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Google did not return an access token.".to_string())?;
-    let expires_at = now_unix().saturating_add(tokens.expires_in.unwrap_or(3600));
+    let refreshed = crate::connectors::oauth_client::oauth_refresh(&store.refresh_token).await?;
+    let access = refreshed.access_token;
+    let expires_at = now_unix().saturating_add(refreshed.expires_in.unwrap_or(3600));
     let mut next = store.clone();
     next.access_token = Some(access.clone());
     next.expires_at = Some(expires_at);
-    if let Some(scope) = tokens.scope.filter(|s| !s.trim().is_empty()) {
-        next.scopes = Some(scope);
+    if let Some(new_refresh) = refreshed.refresh_token.filter(|s| !s.is_empty()) {
+        next.refresh_token = new_refresh;
     }
     let _ = write_store(&next);
     if let Ok(mut guard) = ACCESS_CACHE.lock() {
@@ -571,34 +309,42 @@ pub fn status() -> Result<GmailStatus, String> {
     })
 }
 
-pub async fn connect(open_url: impl FnOnce(&str) -> Result<(), String>) -> Result<GmailStatus, String> {
-    let client_id = client_id()?;
-    let port = portpicker::pick_unused_port().ok_or_else(|| {
-        "Could not reserve a local port for Gmail sign-in.".to_string()
-    })?;
-    // Desktop client JSON registers http://localhost (any port).
-    let redirect_uri = format!("http://localhost:{port}");
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-        .await
-        .map_err(|_| "Could not start the Gmail sign-in listener.".to_string())?;
-    let (verifier, challenge) = pkce_pair();
-    let state = random_state();
-    let auth = format!(
-        "{AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent&state={}",
-        urlencoding::encode(&client_id),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(GMAIL_SCOPES),
-        urlencoding::encode(&challenge),
-        urlencoding::encode(&state),
-    );
-    open_url(&auth)?;
-
-    let code = wait_for_oauth_redirect(listener, &state).await?;
-
-    let client = http_client()?;
-    let store = exchange_code(&client, &client_id, &code, &verifier, &redirect_uri).await?;
+/// Persist tokens from the nela-backend OAuth broker (no desktop client secret).
+pub fn apply_broker_tokens(
+    access_token: String,
+    refresh_token: String,
+    expires_in: Option<u64>,
+    scope: Option<String>,
+    email: Option<String>,
+) -> Result<GmailStatus, String> {
+    let expires_at = expires_in.map(|secs| now_unix().saturating_add(secs));
+    let store = StoredGmailTokens {
+        refresh_token,
+        access_token: Some(access_token.clone()),
+        expires_at,
+        email: email.clone(),
+        scopes: scope,
+    };
     write_store(&store)?;
+    if let Some(exp) = expires_at {
+        if let Ok(mut guard) = ACCESS_CACHE.lock() {
+            *guard = Some(CachedAccess {
+                access_token,
+                expires_at: exp,
+                email: email.clone(),
+            });
+        }
+    }
     Ok(status_from_store(&store))
+}
+
+pub async fn connect(
+    _open_url: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<GmailStatus, String> {
+    Err(
+        "Gmail sign-in is handled by NELA Cloud. Use Connect in Settings or the Connectors panel."
+            .into(),
+    )
 }
 
 pub async fn disconnect() -> Result<GmailStatus, String> {
@@ -1021,12 +767,14 @@ pub async fn read_messages(
             });
         }
     };
-    if !store_can_read(&store) {
+    // If scopes were never recorded (older connects), still try the API —
+    // Google will 403 if readonly was never granted.
+    if !store_can_read(&store) && store.scopes.is_some() {
         return Ok(GmailReadResult {
             ok: false,
             messages: None,
             reason: Some(
-                "Gmail is connected for send only. Disconnect and Connect again to allow reading mail."
+                "Gmail is connected for send only. Disconnect and Connect again in Settings → Connections to allow reading mail."
                     .into(),
             ),
             needs_reauth: Some(true),

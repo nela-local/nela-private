@@ -1,7 +1,7 @@
 //! Gmail adapter for the connector registry.
 //!
-//! Auth uses desktop PKCE (`connectors::gmail`). File-mirror ops are N/A;
-//! chat send still goes through `gmail_send`.
+//! OAuth is brokered by nela-backend (`cloud_broker`). Tokens stay on-device.
+//! File-mirror ops are N/A; chat send/read go through `gmail_send` / `gmail_read`.
 
 use crate::connectors::backend::ConnectorBackend;
 use crate::connectors::error::ConnectorError;
@@ -12,7 +12,6 @@ use crate::connectors::types::{
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_opener::OpenerExt;
 
 pub struct GmailBackend;
 
@@ -24,12 +23,6 @@ fn bind_app_data(app: &AppHandle) -> Result<(), ConnectorError> {
     std::fs::create_dir_all(&dir).map_err(|e| ConnectorError::io(e.to_string()))?;
     gmail::set_app_data_dir(dir);
     Ok(())
-}
-
-fn open_url(app: &AppHandle, url: &str) -> Result<(), String> {
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|_| "We couldn't open your browser. Please try again.".to_string())
 }
 
 fn status_to_connection(status: GmailStatus) -> Option<ConnectionInfo> {
@@ -55,15 +48,10 @@ impl ConnectorBackend for GmailBackend {
         "gmail"
     }
 
-    async fn connect_account(&self, app: &AppHandle) -> Result<ConnectionInfo, ConnectorError> {
-        bind_app_data(app)?;
-        let app_clone = app.clone();
-        let status = gmail::connect(move |url| open_url(&app_clone, url))
-            .await
-            .map_err(ConnectorError::invalid)?;
-        status_to_connection(status).ok_or_else(|| {
-            ConnectorError::invalid("Gmail sign-in did not complete.".to_string())
-        })
+    async fn connect_account(&self, _app: &AppHandle) -> Result<ConnectionInfo, ConnectorError> {
+        Err(ConnectorError::invalid(
+            crate::connectors::google_oauth::CREDENTIALS_ON_BACKEND.to_string(),
+        ))
     }
 
     fn account_status(&self, app: &AppHandle) -> Result<Option<ConnectionInfo>, ConnectorError> {

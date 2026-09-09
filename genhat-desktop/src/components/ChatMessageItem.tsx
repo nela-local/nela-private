@@ -560,8 +560,11 @@ function ChatMessageItemInner({
                           {/* Read response aloud button */}
                           <SpeakButton text={msg.content} compact />
                         {advanced && msg.generateTime !== undefined && (
-                            <span className="text-[0.78rem] text-txt-muted ml-1" title={msg.firstTokenTime !== undefined ? `Generated in ${msg.generateTime}s\nFirst token in ${msg.firstTokenTime}s` : `Generated in ${msg.generateTime}s`}>
-                              Generated in {msg.generateTime}s {msg.firstTokenTime !== undefined && `• First token in ${msg.firstTokenTime}s`}
+                            <span
+                              className="text-[0.78rem] text-txt-muted ml-1"
+                              title={`Generated in ${msg.generateTime}s`}
+                            >
+                              Generated in {msg.generateTime}s
                             </span>
                           )}
                           {modelLabel ? (

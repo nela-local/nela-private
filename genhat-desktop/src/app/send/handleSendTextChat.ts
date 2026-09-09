@@ -622,13 +622,47 @@ export async function handleSendTextChat(
     thinkingFlusher.push(windowThinkingForUi(fullThinking));
   };
 
-  // Tool loop when web, knowledge-base, and/or auto-artifact chart prep is needed.
-  // Do NOT auto-route to facet research — web search runs only when the model
-  // calls web_search(query, depth).
-  const useToolLoop = effectiveWebEnabled || fileSearchEnabled || autoArtifacts;
+  // Tool loop when web, knowledge-base, connector intents, and/or auto-artifact
+  // chart prep is needed. Gmail/Telegram/Drive tools only exist in this loop —
+  // without it the model invents “I don’t have Gmail access”.
+  const emailIntent = looksLikeEmailRequest(text);
+  const telegramIntent = looksLikeTelegramRequest(text);
+  const driveIntent = looksLikeDriveRequest(text);
+  let connectorToolsNeeded = false;
+  if (emailIntent || telegramIntent || driveIntent) {
+    try {
+      if (emailIntent && (await Api.gmailStatus()).connected) {
+        connectorToolsNeeded = true;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (telegramIntent && (await Api.telegramStatus()).connected) {
+        connectorToolsNeeded = true;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (driveIntent && (await Api.driveStatus()).connected) {
+        connectorToolsNeeded = true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  const useToolLoop =
+    effectiveWebEnabled ||
+    fileSearchEnabled ||
+    autoArtifacts ||
+    connectorToolsNeeded;
   if (useToolLoop) {
-    if (fileSearchEnabled && !effectiveWebEnabled) {
+    if (fileSearchEnabled && !effectiveWebEnabled && !connectorToolsNeeded) {
       useChatModeStore.getState().setLiveToolStatus("Ready to search your files…");
+    }
+    if (connectorToolsNeeded && emailIntent) {
+      useChatModeStore.getState().setLiveToolStatus("Using Gmail…");
     }
     runCloudAwareToolLoop({
       messages: sendMessages,

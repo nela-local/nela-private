@@ -152,6 +152,7 @@ pub async fn connectors_oauth_poll(
                 .unwrap_or_else(|| "Google Drive".into());
             let scopes = tokens
                 .scope
+                .clone()
                 .map(|s| {
                     s.split_whitespace()
                         .map(|x| x.to_string())
@@ -170,6 +171,26 @@ pub async fn connectors_oauth_poll(
                     tokens.expires_in,
                     scopes,
                 )?
+            } else if provider == "gmail" {
+                crate::connectors::gmail::set_app_data_dir(dir.clone());
+                let status = crate::connectors::gmail::apply_broker_tokens(
+                    tokens.access_token,
+                    refresh,
+                    tokens.expires_in,
+                    tokens.scope,
+                    tokens.account_email.clone(),
+                )?;
+                crate::connectors::types::ConnectionInfo {
+                    id: ConnectionId("gmail".into()),
+                    provider_id: "gmail".into(),
+                    display_name: "Gmail".into(),
+                    account_email: status.email,
+                    remote_folder_id: None,
+                    remote_folder_name: None,
+                    mirror_root: None,
+                    last_sync_at: None,
+                    status: crate::connectors::types::ConnectionStatus::Connected,
+                }
             } else {
                 return Err(format!("{provider} is coming soon."));
             };
@@ -186,9 +207,12 @@ pub async fn connectors_disconnect(
 ) -> Result<(), String> {
     Registry::ensure_initialized();
 
-    // Provider-id disconnect for account-lifecycle connectors (e.g. "gmail").
+    // Provider-id disconnect for account-lifecycle connectors (e.g. "gmail", "telegram").
     if let Some(def) = crate::connectors::catalog::find_definition(&connection_id) {
-        if def.connect_flow == "desktop_pkce" || def.connect_flow == "telegram_mtproto" {
+        if def.id == "gmail"
+            || def.connect_flow == "desktop_pkce"
+            || def.connect_flow == "telegram_mtproto"
+        {
             if let Some(backend) = crate::connectors::backend::get_backend(&connection_id) {
                 return backend
                     .disconnect_account(&app)

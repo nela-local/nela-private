@@ -90,15 +90,20 @@ Intelligence selector **Fast / Smart / Deep / Auto** maps to API `mode` on cloud
 
 ## Google connectors (NELA ops — not end users)
 
-End users only click **Connect Gmail** and Allow. They never see client IDs or `.env`.
+End users only click **Connect** and Allow. They never see client IDs or `.env`.
 
 Before a wide release:
 
-1. On the NELA Google Cloud project (same org as website login), enable the Gmail API (Drive API later).
-2. Create a **Desktop** OAuth client — not the website login client (`GOOGLE_CLIENT_ID` on the API).
-3. Consent screen: app name NELA, support email, logo, homepage, privacy policy.
-4. Bake the public client ID into release builds: set GitHub secret `NELA_GOOGLE_CONNECTOR_CLIENT_ID` (compile-time). Local `.env` is a dev override only.
-5. Submit Google verification for `gmail.send` before shipping to non-test users. Until then, only GCP test users can connect without the “unverified app” warning.
+1. On the NELA Google Cloud project, enable the Gmail API and Drive API.
+2. Use a **Web application** OAuth client (can be dedicated `GOOGLE_CONNECTOR_*` or the existing website `GOOGLE_CLIENT_*`).
+3. Add authorized redirect URI: `{PUBLIC_API_URL}/v1/connectors/oauth/callback`
+   (e.g. `http://localhost:3001/v1/connectors/oauth/callback` for local API).
+4. Set on **nela-backend** only: `GOOGLE_CONNECTOR_CLIENT_ID` / `GOOGLE_CONNECTOR_CLIENT_SECRET`
+   (or fall back to `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`). **Never bake these into the desktop app.**
+5. Consent screen: app name NELA, support email, homepage, privacy policy.
+6. Submit Google verification for `gmail.send`, `gmail.readonly`, and Drive scopes before shipping to non-test users.
+
+Desktop flow: `POST /v1/connectors/oauth/start` → browser → callback on API → desktop `poll` → tokens stored on device. Refresh uses `POST /v1/connectors/oauth/refresh`.
 - Fast/Smart/Deep model IDs are **not** hardcoded forever: the API sweeper pulls
   `GET https://openrouter.ai/api/v1/models` on boot and every
   `OPENROUTER_SWEEP_INTERVAL_MS` (default 6h), classifies free vs paid chat
@@ -112,7 +117,7 @@ Desktop connectors sync remote folders (Google Drive first) into local mirrors u
 
 - **OAuth only on the API:** `POST /v1/connectors/oauth/start|poll|refresh` and
   `GET /v1/connectors/oauth/callback`. No Drive file bytes go through NELA Cloud.
-- Env: reuse `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, or set
+- Env (API): reuse `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, or set
   `GOOGLE_CONNECTOR_CLIENT_ID` / `GOOGLE_CONNECTOR_CLIENT_SECRET` /
   `GOOGLE_CONNECTOR_REDIRECT_URI` (`{PUBLIC_API_URL}/v1/connectors/oauth/callback`).
 - Add that redirect URI in Google Cloud Console for the OAuth client.

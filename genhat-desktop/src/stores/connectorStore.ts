@@ -89,10 +89,10 @@ function resolveConnectFlow(
 ): string {
   const info = providers.find((p) => p.id === provider);
   if (info?.connectFlow) return info.connectFlow;
-  // Never assume cloud_broker — Gmail is desktop_pkce.
-  if (provider === "gmail") return "desktop_pkce";
   if (provider === "telegram") return "telegram_mtproto";
   if (provider === "local") return "none";
+  // Gmail + Drive sign in through the cloud OAuth broker.
+  if (provider === "gmail" || provider === "gdrive") return "cloud_broker";
   return "cloud_broker";
 }
 

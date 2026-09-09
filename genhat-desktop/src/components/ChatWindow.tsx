@@ -1031,19 +1031,6 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
 
         {/* Audio Player (legacy block removed; now only rendered inline after assistant messages) */}
 
-        {/* Response time completion (advanced only; keeps simple mode calmer) */}
-        {advanced && chatMode !== "audio" && generalGenerationTime !== null && !generalGenerating && (
-          <div className="flex items-center gap-1.5 py-1 px-3 rounded-full max-w-3xl mx-auto text-[0.78rem] text-success">
-            <span>✓</span>
-            <span>
-              {chatMode === "vision" && `Analyzed in ${generalGenerationTime.toFixed(1)}s`}
-              {chatMode === "rag" && `Processed in ${generalGenerationTime.toFixed(1)}s`}
-              {chatMode === "text" && `Generated in ${generalGenerationTime.toFixed(1)}s`}
-              {chatMode === "mindmap" && `Mindmap built in ${generalGenerationTime.toFixed(1)}s`}
-            </span>
-          </div>
-        )}
-
         {/* Cancelled notice */}
         {cancelled && (
           <div className="text-center py-1.5 text-[0.78rem] text-txt-muted">⏹ Response stopped</div>

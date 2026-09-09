@@ -24,69 +24,10 @@ use std::sync::Arc;
 
 struct GDriveBackend;
 
-fn open_url(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|_| "We couldn't open your browser. Please try again.".to_string())
-}
-
-const GDRIVE_SCOPES: &str = "openid email profile \
-https://www.googleapis.com/auth/drive.readonly \
-https://www.googleapis.com/auth/drive.file";
-
 #[async_trait]
 impl ConnectorBackend for GDriveBackend {
     fn id(&self) -> &'static str {
         "gdrive"
-    }
-
-    async fn connect_account(
-        &self,
-        app: &tauri::AppHandle,
-    ) -> Result<crate::connectors::types::ConnectionInfo, ConnectorError> {
-        use tauri::Manager;
-        let dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| ConnectorError::io(e.to_string()))?;
-        std::fs::create_dir_all(&dir).map_err(|e| ConnectorError::io(e.to_string()))?;
-
-        let app_clone = app.clone();
-        let tokens = crate::connectors::desktop_pkce::authorize(
-            move |url| open_url(&app_clone, url),
-            GDRIVE_SCOPES,
-            "Google Drive",
-        )
-        .await
-        .map_err(ConnectorError::invalid)?;
-
-        let connection_id = uuid::Uuid::new_v4().to_string();
-        let display = tokens
-            .name
-            .clone()
-            .or_else(|| tokens.email.clone())
-            .unwrap_or_else(|| "Google Drive".into());
-        let scopes = tokens
-            .scope
-            .map(|s| {
-                s.split_whitespace()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        gdrive::store_new_connection(
-            &dir,
-            &connection_id,
-            tokens.email,
-            display,
-            tokens.access_token,
-            tokens.refresh_token,
-            tokens.expires_in,
-            scopes,
-        )
-        .map_err(ConnectorError::io)
     }
 
     fn account_status(

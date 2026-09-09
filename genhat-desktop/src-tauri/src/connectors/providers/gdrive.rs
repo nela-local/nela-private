@@ -165,20 +165,10 @@ async fn access_token(app_data: &Path, conn: &ConnectionId) -> Result<String, Co
         return Ok(token);
     }
 
-    // Prefer on-device refresh (desktop PKCE client). Fall back to cloud broker
-    // for connections created before Drive moved off the broker.
-    let refreshed = match crate::connectors::desktop_pkce::refresh_access_token(&cred.refresh_token)
+    // Refresh via nela-backend OAuth broker (client secret stays on the API).
+    let refreshed = oauth_client::oauth_refresh(&cred.refresh_token)
         .await
-    {
-        Ok(r) => oauth_client::RefreshResponse {
-            access_token: r.access_token,
-            expires_in: r.expires_in,
-            refresh_token: r.refresh_token,
-        },
-        Err(_) => oauth_client::oauth_refresh(&cred.refresh_token)
-            .await
-            .map_err(|_| ConnectorError::needs_reauth())?,
-    };
+        .map_err(|_| ConnectorError::needs_reauth())?;
 
     let expires_at = refreshed
         .expires_in

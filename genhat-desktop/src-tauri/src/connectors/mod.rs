@@ -5,12 +5,11 @@
 //! Backends: `providers/*` registered in `providers::register_all`.
 //!
 //! Auth flows (from catalog `connect_flow`):
-//! - `cloud_broker` — OAuth code exchange via nela-backend (optional / legacy)
-//! - `desktop_pkce` — on-device PKCE loopback (Gmail + Drive); no cloud broker
+//! - `cloud_broker` — OAuth via nela-backend start/poll (Gmail + Drive); secrets on API
+//! - `desktop_pkce` — legacy (unused for Google)
 //! - `telegram_mtproto` — phone + login code + optional 2FA; session on-device
 //! - `none` — no OAuth
 
-pub mod desktop_pkce;
 pub mod gmail;
 pub mod google_oauth;
 pub mod telegram;

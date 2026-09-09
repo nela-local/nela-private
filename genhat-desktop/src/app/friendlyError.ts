@@ -70,11 +70,11 @@ export function friendlyError(raw: string | undefined | null): string {
   }
 
   if (
-    lower.includes("nela_gmail_oauth_client_id") ||
-    lower.includes("nela_google_connector_client_id") ||
+    lower.includes("google connector oauth is not configured") ||
+    lower.includes("couldn't start connector sign-in") ||
     (lower.includes("gmail") && lower.includes(".env"))
   ) {
-    return "Gmail isn't available in this copy of NELA. Update the app and try Connect again.";
+    return "Google connectors aren't configured on NELA Cloud yet. Start the API with GOOGLE_CLIENT_* (or GOOGLE_CONNECTOR_*) and try Connect again.";
   }
 
   if (
