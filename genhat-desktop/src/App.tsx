@@ -10,6 +10,7 @@ import ChatHistorySidebar from "./components/ChatHistorySidebar";
 import SidebarNav from "./components/SidebarNav";
 import AudioSidebar from "./components/AudioSidebar";
 import MindmapsSidebar from "./components/MindmapsSidebar";
+import ArtifactsSidebar from "./components/ArtifactsSidebar";
 import PlaygroundSidebar from "./components/PlaygroundSidebar";
 import StartupModelToast from "./components/StartupModelToast";
 import AppUpdateToast from "./components/AppUpdateToast";
@@ -93,7 +94,9 @@ function App() {
     };
   }, []);
 
-  const handleSidebarNav = (section: "chats" | "audio" | "mindmaps" | "playground") => {
+  const handleSidebarNav = (
+    section: "chats" | "audio" | "mindmaps" | "artifacts" | "playground"
+  ) => {
     setSidebarSection(section === sidebarSection ? null : section);
     if (section === "playground") {
       handleModeSwitch("playground");
@@ -222,6 +225,7 @@ function App() {
             {sidebarSection === "chats" && <ChatHistorySidebar />}
             {sidebarSection === "audio" && <AudioSidebar />}
             {sidebarSection === "mindmaps" && <MindmapsSidebar />}
+            {sidebarSection === "artifacts" && <ArtifactsSidebar />}
             {sidebarSection === "playground" && (
               <PlaygroundSidebar
                 onOpen={() => {

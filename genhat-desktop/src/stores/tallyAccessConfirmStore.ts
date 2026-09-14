@@ -59,6 +59,11 @@ export const clearTallySessionTrust = () => {
   useTallyAccessConfirmStore.setState({ sessionTrusted: false });
 };
 
+/** Mark this app session as trusted for Tally read tools (live dashboard path). */
+export const grantTallySessionTrust = () => {
+  useTallyAccessConfirmStore.setState({ sessionTrusted: true });
+};
+
 export const isTallySessionTrusted = () =>
   useTallyAccessConfirmStore.getState().sessionTrusted;
 

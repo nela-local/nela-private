@@ -3,6 +3,7 @@ import {
   MessageSquare,
   Volume2,
   Share2,
+  LayoutDashboard,
   Workflow,
   FolderOpen,
   Save,
@@ -18,9 +19,11 @@ import { useCloudStore } from "../stores/cloudStore";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { isPremiumAccount } from "../app/premiumAccess";
 
+type SidebarSection = "chats" | "audio" | "mindmaps" | "artifacts" | "playground";
+
 interface SidebarNavProps {
-  selected: "chats" | "audio" | "mindmaps" | "playground" | null;
-  onSelect: (section: "chats" | "audio" | "mindmaps" | "playground") => void;
+  selected: SidebarSection | null;
+  onSelect: (section: SidebarSection) => void;
   onImportProject: () => void;
   onExportProject: () => void;
   onOpenSettings: () => void;
@@ -100,6 +103,14 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         data-tour="sidebar-mindmaps"
       >
         <Share2 size={30} />
+      </button>
+      <button
+        className={`flex flex-col items-center gap-1 px-2 py-2 rounded-lg transition-colors ${selected === "artifacts" ? "bg-neon-subtle text-neon" : "text-txt-secondary hover:text-neon"}`}
+        title="Dashboards & artifacts"
+        onClick={() => onSelect("artifacts")}
+        data-tour="sidebar-artifacts"
+      >
+        <LayoutDashboard size={30} />
       </button>
       <button
         className={`flex flex-col items-center gap-1 px-2 py-2 rounded-lg transition-colors ${selected === "playground" ? "bg-neon-subtle text-neon" : "text-txt-secondary hover:text-neon"}`}

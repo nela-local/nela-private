@@ -24,6 +24,7 @@ import { parseCSV } from "../app/send/csvParse";
 import { extractCsvSheetArtifacts, sanitizeCsvArtifactBody } from "../app/sanitizeCsvArtifact";
 import { sanitizeExcelSheetName } from "../app/spreadsheetPlan";
 import { Api } from "../api";
+import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
 import ExcelSheetGrid from "./ExcelSheetGrid";
 import type { PreviewEditMessage } from "./ArtifactPreviewEditChat";
 import ArtifactPreviewEditBar from "./ArtifactPreviewEditBar";
@@ -632,13 +633,10 @@ export default function ArtifactSidePanel({
 
   // Live Tally dashboard: iframe postMessage → Api.tally* → response
   useEffect(() => {
-    let detach: (() => void) | undefined;
-    void import("../app/tallyLiveBridge").then(({ attachTallyLiveBridge }) => {
-      detach = attachTallyLiveBridge(
-        () => previewIframeRef.current?.contentWindow ?? null
-      );
-    });
-    return () => detach?.();
+    const detach = attachTallyLiveBridge(
+      () => previewIframeRef.current?.contentWindow ?? null
+    );
+    return () => detach();
   }, []);
 
   /** Preview srcDoc — gate library rail; inject click-to-select while Edit is open. */

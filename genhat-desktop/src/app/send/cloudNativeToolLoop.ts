@@ -27,6 +27,23 @@ import { groundWebSearchQuery } from "./followUpSearchQuery";
 import { mergeWebSearchResults, runWebSearchToolLoop } from "./webSearchToolLoop";
 import { normalizeWebToolDepth, runWebSearchWithDepth } from "./webSearchDepth";
 import { knowledgeBaseToSearchResult, fileUrlToPath, isLocalFileHitUrl } from "./fileSearchCitations";
+import {
+  executeTallyDaybook,
+  executeTallyListLedgers,
+  executeTallyLiveDashboard,
+  executeTallyOutstanding,
+  executeTallyTrialBalance,
+} from "./tallyTools";
+import { executeAskFollowUp, type AskFollowUpArgs } from "./askFollowUp";
+import { executeGmailSend } from "./gmailSend";
+import { executeGmailRead } from "./gmailRead";
+import { executeTelegramSend } from "./telegramSend";
+import { executeTelegramRead } from "./telegramRead";
+import {
+  executeDriveGet,
+  executeDriveListRecent,
+  executeDriveSearch,
+} from "./driveTools";
 import type { GenerationOptions } from "./types";
 import {
   MAX_ARTIFACT_WEB_RESEARCH_ROUNDS,
@@ -41,7 +58,6 @@ import {
 } from "../artifactChartPool";
 import { normalizeSpreadsheetPlan } from "../spreadsheetPlan";
 import { currentQuarter } from "../nelaSystemPrompt";
-import type { AskFollowUpArgs } from "./askFollowUp";
 import { beginAskFollowUpTurn } from "../../stores/followUpStore";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
 import { looksLikeTelegramRequest } from "./telegramConnectIntent";
@@ -50,6 +66,14 @@ import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromp
 import { looksLikeDriveRequest } from "./driveConnectIntent";
 import { looksLikeTallyRequest } from "./tallyConnectIntent";
 import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
+
+/** Vite/WebView stale-chunk failures — must not dump connector turns onto local. */
+function isStaleModuleImportError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /importing a module script failed|failed to fetch dynamically imported module|error loading dynamically imported module/i.test(
+    msg
+  );
+}
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
 const MAX_CHART_PREP_ROUNDS = 6;
@@ -651,7 +675,6 @@ async function executeToolCall(
   }
 
   if (name === "ask_followup") {
-    const { executeAskFollowUp } = await import("./askFollowUp");
     const result = await executeAskFollowUp(
       {
         reason: typeof args.reason === "string" ? args.reason : undefined,
@@ -673,7 +696,6 @@ async function executeToolCall(
   }
 
   if (name === "gmail_send") {
-    const { executeGmailSend } = await import("./gmailSend");
     const result = await executeGmailSend(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -685,7 +707,6 @@ async function executeToolCall(
   }
 
   if (name === "gmail_read") {
-    const { executeGmailRead } = await import("./gmailRead");
     const result = await executeGmailRead(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -697,7 +718,6 @@ async function executeToolCall(
   }
 
   if (name === "telegram_send") {
-    const { executeTelegramSend } = await import("./telegramSend");
     const result = await executeTelegramSend(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -709,7 +729,6 @@ async function executeToolCall(
   }
 
   if (name === "telegram_read") {
-    const { executeTelegramRead } = await import("./telegramRead");
     const result = await executeTelegramRead(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -721,7 +740,6 @@ async function executeToolCall(
   }
 
   if (name === "drive_search") {
-    const { executeDriveSearch } = await import("./driveTools");
     const result = await executeDriveSearch(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -733,7 +751,6 @@ async function executeToolCall(
   }
 
   if (name === "drive_list_recent") {
-    const { executeDriveListRecent } = await import("./driveTools");
     const result = await executeDriveListRecent(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -745,7 +762,6 @@ async function executeToolCall(
   }
 
   if (name === "drive_get") {
-    const { executeDriveGet } = await import("./driveTools");
     const result = await executeDriveGet(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -769,7 +785,6 @@ async function executeToolCall(
   }
 
   if (name === "tally_list_ledgers") {
-    const { executeTallyListLedgers } = await import("./tallyTools");
     const result = await executeTallyListLedgers(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -778,7 +793,6 @@ async function executeToolCall(
   }
 
   if (name === "tally_trial_balance") {
-    const { executeTallyTrialBalance } = await import("./tallyTools");
     const result = await executeTallyTrialBalance(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -787,7 +801,6 @@ async function executeToolCall(
   }
 
   if (name === "tally_daybook") {
-    const { executeTallyDaybook } = await import("./tallyTools");
     const result = await executeTallyDaybook(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -796,7 +809,6 @@ async function executeToolCall(
   }
 
   if (name === "tally_outstanding") {
-    const { executeTallyOutstanding } = await import("./tallyTools");
     const result = await executeTallyOutstanding(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -805,7 +817,6 @@ async function executeToolCall(
   }
 
   if (name === "tally_live_dashboard") {
-    const { executeTallyLiveDashboard } = await import("./tallyTools");
     const result = await executeTallyLiveDashboard(args, {
       signal: opts.signal,
       onStatus: opts.onToolStatus,
@@ -865,7 +876,29 @@ async function executeToolCallsParallel(
   }
 
   const results = await Promise.all(
-    toolCalls.map((call) => executeToolCall(call, opts, null))
+    toolCalls.map(async (call) => {
+      try {
+        return await executeToolCall(call, opts, null);
+      } catch (e) {
+        if (
+          (e instanceof DOMException && e.name === "AbortError") ||
+          (e instanceof Error && e.name === "AbortError")
+        ) {
+          throw e;
+        }
+        // Keep the cloud loop alive: one broken tool must not dump to local.
+        const message = e instanceof Error ? e.message : String(e);
+        console.warn(`Tool ${call.function.name} failed:`, e);
+        return {
+          content: JSON.stringify({
+            ok: false,
+            error: message,
+            tool: call.function.name,
+          }),
+          webSearchResult: null,
+        };
+      }
+    })
   );
 
   let merged = webSearchResult;
@@ -1038,9 +1071,46 @@ export async function runCloudAwareToolLoop(
     ) {
       throw err;
     }
+    // Stale Vite chunks after HMR — retry once, then stop. Never hand Tally/Gmail
+    // turns to the local model (it has no connector tools).
+    if (isStaleModuleImportError(err)) {
+      console.warn("Cloud tool loop hit stale module import; retrying once:", err);
+      try {
+        return await runCloudNativeToolLoop(opts);
+      } catch (retryErr) {
+        if (
+          (retryErr instanceof DOMException && retryErr.name === "AbortError") ||
+          (retryErr instanceof Error && retryErr.name === "AbortError")
+        ) {
+          throw retryErr;
+        }
+        console.warn("Cloud tool loop retry failed:", retryErr);
+        return {
+          content:
+            "*The app UI cache is stale (module failed to load). Quit NELA fully, restart `npm run tauri:dev`, then ask again. Tally and other connectors need Cloud — local fallback cannot run them.*\n\n",
+          thinking: "",
+          webSearchResult: null,
+          artifacts: [],
+        };
+      }
+    }
+    if (needsConnectors) {
+      console.warn("Cloud tool loop failed (connectors); not using local:", err);
+      return {
+        content: `*NELA Cloud hit an error — ${summarizeCloudErrorSafe(err)} Connectors need Cloud, so this turn was not sent to the local model. Please try again.*\n\n`,
+        thinking: "",
+        webSearchResult: null,
+        artifacts: [],
+      };
+    }
     console.warn("Cloud tool loop failed; falling back to local:", err);
     return runLocal(formatCloudFallbackNotice(err));
   }
+}
+
+function summarizeCloudErrorSafe(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.trim() || "unknown error";
 }
 
 export async function runCloudNativeToolLoop(

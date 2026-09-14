@@ -19,6 +19,8 @@ describe("tallyLiveDashboard", () => {
       portHint: 9000,
     });
     assert.match(html, /data-nela-tally-live="1"/);
+    assert.match(html, /id="standalone"/);
+    assert.match(html, /var embedded/);
     assert.match(html, new RegExp(NELA_TALLY_REQUEST));
     assert.match(html, new RegExp(NELA_TALLY_RESPONSE));
     assert.match(html, /id="refreshBtn"/);

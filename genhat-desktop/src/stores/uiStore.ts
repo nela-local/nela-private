@@ -33,7 +33,7 @@ interface UIState {
   hfModalOpen: boolean;
   hfModalPreset: { folder: string; profile: "none" | ImportModelProfile };
   appModal: AppModalState;
-  sidebarSection: "chats" | "audio" | "mindmaps" | "playground" | null;
+  sidebarSection: "chats" | "audio" | "mindmaps" | "artifacts" | "playground" | null;
   docPanelOpen: boolean;
   paramsDockOpen: boolean;
   modeSwitchNotice: string | null;
@@ -59,7 +59,7 @@ interface UIActions {
     modal: AppModalState | ((prev: AppModalState) => AppModalState)
   ) => void;
   setSidebarSection: (
-    section: "chats" | "audio" | "mindmaps" | "playground" | null
+    section: "chats" | "audio" | "mindmaps" | "artifacts" | "playground" | null
   ) => void;
   setDocPanelOpen: (open: boolean) => void;
   setParamsDockOpen: (open: boolean | ((prev: boolean) => boolean)) => void;

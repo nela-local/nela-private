@@ -673,6 +673,19 @@ export function streamChatByMode(args: StreamArgs): void {
       args.onError(new Error(friendlyError(msg)));
       return;
     }
+    // Stale Vite/WebView chunks — local can't run connector tools; surface error.
+    if (
+      /importing a module script failed|failed to fetch dynamically imported module|error loading dynamically imported module/i.test(
+        msg
+      )
+    ) {
+      args.onError(
+        new Error(
+          "App UI cache is stale (module failed to load). Quit NELA and restart tauri:dev, then try again."
+        )
+      );
+      return;
+    }
     if (disableLocalFallback) {
       args.onError(new Error(friendlyError(msg)));
       return;

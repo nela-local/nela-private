@@ -9,6 +9,7 @@ import { downloadArtifactCopy, exportArtifactDeck, exportArtifactDocx } from "..
 import type { DeckExportFormat } from "../app/exportDeck";
 import { prepareArtifactHtmlPreview } from "../app/artifactHtmlPreview";
 import { isPresentationPreviewHtml } from "../app/presentationPreviewSelect";
+import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
 
 export interface InlineArtifactProps {
   artifactPath?: string | null;
@@ -219,11 +220,10 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
   // Live Tally dashboard bridge for inline HTML preview
   useEffect(() => {
     if (!artifactHtml || !/data-nela-tally-live/i.test(artifactHtml)) return;
-    let detach: (() => void) | undefined;
-    void import("../app/tallyLiveBridge").then(({ attachTallyLiveBridge }) => {
-      detach = attachTallyLiveBridge(() => iframeRef.current?.contentWindow ?? null);
-    });
-    return () => detach?.();
+    const detach = attachTallyLiveBridge(
+      () => iframeRef.current?.contentWindow ?? null
+    );
+    return () => detach();
   }, [artifactHtml]);
 
   const filename = currentPath ? currentPath.split(/[/\\]/).pop() : "artifact";

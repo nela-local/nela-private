@@ -3,7 +3,6 @@
  */
 
 import { Api } from "../api";
-import { isTallySessionTrusted } from "../stores/tallyAccessConfirmStore";
 import {
   NELA_TALLY_REQUEST,
   NELA_TALLY_RESPONSE,
@@ -106,21 +105,7 @@ export async function handleTallyLiveRequest(
       };
     }
 
-    // Live dashboard refreshes skip per-call cards when session is trusted.
-    // If not trusted yet, still allow status; exports ask the user to Allow once in chat.
-    if (!isTallySessionTrusted()) {
-      return {
-        type: NELA_TALLY_RESPONSE,
-        id: data.id,
-        ok: false,
-        kind,
-        needsAllow: true,
-        error:
-          "Allow Tally read in chat (Allow for session), then Refresh this dashboard.",
-        meta,
-      };
-    }
-
+    // Live dashboard preview: read-only refreshes are auto-approved (no chat Allow card).
     const result = await runKind(kind, data);
     const failed =
       result &&

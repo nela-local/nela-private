@@ -3,8 +3,11 @@
  */
 
 import { Api } from "../../api";
+import { buildTallyLiveDashboardHtml } from "../tallyLiveDashboard";
 import {
   cancelTallyAccessConfirm,
+  grantTallySessionTrust,
+  isTallySessionTrusted,
   openTallyAccessConfirm,
   type TallyAccessKind,
 } from "../../stores/tallyAccessConfirmStore";
@@ -55,9 +58,6 @@ async function withConfirm<T>(
     return { ok: false, reason: "user_cancelled" };
   }
 
-  const { isTallySessionTrusted } = await import(
-    "../../stores/tallyAccessConfirmStore"
-  );
   const trusted = isTallySessionTrusted();
 
   if (!trusted) {
@@ -218,7 +218,7 @@ export async function executeTallyLiveDashboard(
     onArtifact?: (artifact: {
       path: string;
       kind: string;
-      warning?: string | null;
+      warning?: string;
     }) => void;
   }
 ): Promise<
@@ -234,55 +234,53 @@ export async function executeTallyLiveDashboard(
     focusRaw === "outstanding" || focusRaw === "trial_balance"
       ? focusRaw
       : "daybook";
-  const purpose = purposeOf(
-    args,
-    "Open a live Tally dashboard that refreshes from your local HTTP server"
-  );
 
-  return withConfirm(
-    "live_dashboard",
-    { purpose, fromDate, toDate },
-    async () => {
-      options?.onStatus?.("Building live Tally dashboard…");
-      const status = await Api.tallyStatus();
-      if (!status.connected) {
-        throw new Error(
-          "Tally is not connected. Connect in Settings first (HTTP on localhost)."
-        );
-      }
-      const { buildTallyLiveDashboardHtml } = await import(
-        "../tallyLiveDashboard"
-      );
-      const html = buildTallyLiveDashboardHtml({
-        title,
-        fromDate,
-        toDate,
-        focus,
-        companyHint: status.company,
-        hostHint: status.host,
-        portHint: status.port ?? undefined,
-      });
-      const artifact = await Api.generateHtml({
-        title,
-        archetype: "landing",
-        sections: [],
-        html,
-        output_name: title,
-      });
-      options?.onArtifact?.(artifact);
+  if (options?.signal?.aborted) {
+    return { ok: false, reason: "user_cancelled" };
+  }
+
+  // Live dashboards are read-only and auto-approved (no Allow card).
+  grantTallySessionTrust();
+  options?.onStatus?.("Opening live Tally dashboard…");
+  try {
+    const status = await Api.tallyStatus();
+    if (!status.connected) {
       options?.onStatus?.(null);
       return {
-        ok: true as const,
-        path: artifact.path,
-        kind: artifact.kind ?? "html",
-        live: true as const,
+        ok: false,
+        reason:
+          "Tally is not connected. Connect in Settings first (HTTP on localhost).",
       };
-    },
-    {
-      signal: options?.signal,
-      onStatus: options?.onStatus,
-      waitingLabel: "Waiting for you to allow the live Tally dashboard…",
-      runningLabel: "Opening live Tally dashboard…",
     }
-  );
+    const html = buildTallyLiveDashboardHtml({
+      title,
+      fromDate,
+      toDate,
+      focus,
+      companyHint: status.company,
+      hostHint: status.host,
+      portHint: status.port ?? undefined,
+    });
+    const artifact = await Api.generateHtml({
+      title,
+      archetype: "landing",
+      sections: [],
+      html,
+      output_name: title,
+    });
+    options?.onArtifact?.(artifact);
+    options?.onStatus?.(null);
+    return {
+      ok: true as const,
+      path: artifact.path,
+      kind: artifact.kind ?? "html",
+      live: true as const,
+    };
+  } catch (e) {
+    options?.onStatus?.(null);
+    return {
+      ok: false,
+      reason: e instanceof Error ? e.message : String(e),
+    };
+  }
 }

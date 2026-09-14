@@ -186,6 +186,12 @@ export function buildTallyLiveDashboardHtml(
     th { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; }
     footer { margin-top: 1.25rem; color: var(--muted); font-size: .72rem; }
     .empty { color: var(--muted); font-size: .85rem; padding: 1rem 0; }
+    #standalone {
+      display: none; margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 12px;
+      background: #fef2f2; color: var(--danger); font-size: .85rem; border: 1px solid #fecaca;
+      line-height: 1.5;
+    }
+    #standalone strong { display: block; margin-bottom: .25rem; }
   </style>
 </head>
 <body data-nela-tally-live="1" data-focus="${esc(focus)}">
@@ -194,6 +200,12 @@ export function buildTallyLiveDashboardHtml(
       <h1>${esc(title)}</h1>
       <p class="sub">Live read-only export via NELA · ${esc(host)}:${port}${company ? " · " + esc(company) : ""}</p>
     </header>
+
+    <div id="standalone" role="alert">
+      <strong>Open this dashboard inside NELA</strong>
+      Live Tally data cannot load from a browser <code>file://</code> page (each file is its own security origin, and there is no NELA bridge).
+      Use the in-app preview or side panel, then press Refresh.
+    </div>
 
     <div class="toolbar">
       <div class="tabs" role="tablist" aria-label="Report">
@@ -232,6 +244,18 @@ export function buildTallyLiveDashboardHtml(
   var chartMix = null;
   var chartTrend = null;
   var seq = 0;
+  // Live bridge only works when this page is previewed inside NELA (iframe/srcDoc).
+  // Top-level file:// in Chrome/Firefox is a unique origin and has no host bridge.
+  var embedded = false;
+  try {
+    embedded = !!(window.parent && window.parent !== window);
+  } catch (_e) {
+    embedded = false;
+  }
+  if (!embedded) {
+    var banner = document.getElementById("standalone");
+    if (banner) banner.style.display = "block";
+  }
 
   function $(id) { return document.getElementById(id); }
   function setStatus(msg, kind) {
@@ -271,6 +295,13 @@ export function buildTallyLiveDashboardHtml(
   }
   function request(kind, extra) {
     return new Promise(function (resolve) {
+      if (!embedded) {
+        resolve({
+          ok: false,
+          error: "Open this live dashboard inside NELA (in-app preview). Browsers block file:// Tally bridges."
+        });
+        return;
+      }
       var id = "t" + (++seq) + "-" + Date.now();
       pending[id] = resolve;
       var msg = Object.assign({ type: REQ, id: id, kind: kind }, extra || {});
@@ -495,6 +526,10 @@ export function buildTallyLiveDashboardHtml(
   }
 
   async function refresh() {
+    if (!embedded) {
+      setStatus("Use NELA’s in-app preview — live Tally will not load from a browser file:// page.", "error");
+      return;
+    }
     var btn = $("refreshBtn");
     btn.disabled = true;
     setStatus("Refreshing from Tally…");
@@ -512,7 +547,7 @@ export function buildTallyLiveDashboardHtml(
       var res = await request(kind, { fromDate: from, toDate: to, maxRows: 200 });
       if (!res.ok) {
         if (res.needsAllow) {
-          setStatus("Allow Tally read in chat once (Allow for session), then Refresh.", "warn");
+          setStatus("Reconnect Tally in Settings, then Refresh.", "warn");
         } else {
           setStatus(res.error || "Export failed. Is Tally running on the connected port?", "error");
         }
