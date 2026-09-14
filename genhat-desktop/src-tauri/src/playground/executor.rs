@@ -17,7 +17,7 @@ pub async fn run_pipeline(
     router: Arc<TaskRouter>,
     app_data_dir: PathBuf,
     app_handle: tauri::AppHandle,
-    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> PipelineRun {
     let run_id = Uuid::new_v4().to_string();
     let mut node_states: HashMap<String, NodeRunState> = HashMap::new();

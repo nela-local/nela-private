@@ -1,4 +1,4 @@
-import React, { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 /** Intrinsic animation stage size from logo-dark-clean.html */
 const STAGE_W = 449;

@@ -107,11 +107,15 @@ impl McpCoordinator {
         let request_json =
             serde_json::to_string(&rpc_request).map_err(|e| format!("Serialise RPC: {e}"))?;
 
-        // Spawn the sidecar with stdio pipes.
-        let mut child = Command::new(&binary_path)
+        // Spawn the sidecar with stdio pipes (no console flash on Windows GUI builds).
+        let mut spawn_cmd = Command::new(&binary_path);
+        spawn_cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        crate::windows_spawn::hide_console_std(&mut spawn_cmd);
+        let mut child = spawn_cmd
             .spawn()
             .map_err(|e| format!("Spawn '{binary_name}': {e}"))?;
 
