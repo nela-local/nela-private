@@ -151,8 +151,8 @@ fn resolve_llama_exe() -> Result<PathBuf, String> {
 }
 
 fn lower_process_priority(child: &Child) {
-    let gov = crate::governor::Governor::new();
-    if !(gov.on_battery() || gov.thermal_pressure()) {
+    // Lightweight probe — avoid Governor::new() (which also probes host topology).
+    if !crate::governor::probe_on_battery() {
         log::info!(
             "Keeping llama-server pid={} at normal priority (AC/cool)",
             child.id()
@@ -177,14 +177,13 @@ fn lower_process_priority(child: &Child) {
 
     #[cfg(windows)]
     {
-        let script = format!(
-            "$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ $p.PriorityClass = 'BelowNormal' }}"
-        );
-        let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        crate::windows_spawn::hide_console_std(&mut cmd);
-        if let Err(e) = cmd.output() {
-            log::warn!("Failed to lower llama-server priority for pid={pid} on Windows: {e}");
+        if crate::windows_spawn::set_below_normal_priority(pid) {
+            log::info!("Set llama-server pid={pid} priority to BelowNormal (battery)");
+        } else {
+            log::warn!(
+                "Failed to lower llama-server priority for pid={pid} on Windows: {}",
+                std::io::Error::last_os_error()
+            );
         }
     }
 }

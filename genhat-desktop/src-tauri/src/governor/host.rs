@@ -216,18 +216,9 @@ fn physical_cores_macos() -> Option<usize> {
 
 #[cfg(windows)]
 fn physical_cores_windows() -> Option<usize> {
-    // NumberOfCores is physical cores (not logical processors).
-    let output = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum",
-        ])
-        .output()
-        .ok()?;
-    let s = String::from_utf8_lossy(&output.stdout);
-    s.trim().parse::<usize>().ok().filter(|&n| n > 0)
+    // Use sysinfo (Win32 GetLogicalProcessorInformationEx) — no PowerShell console flash.
+    let sys = sysinfo::System::new();
+    sys.physical_core_count().filter(|&n| n > 0)
 }
 
 #[cfg(test)]

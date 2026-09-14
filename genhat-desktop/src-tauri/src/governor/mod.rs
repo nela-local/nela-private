@@ -177,24 +177,36 @@ fn detect_battery_macos() -> bool {
 
 #[cfg(windows)]
 fn detect_battery_windows() -> bool {
-    // Use PowerShell — avoids winapi dependency.
-    // BatteryStatus 2 = AC Power; anything else = on battery / unknown.
-    match std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "(Get-WmiObject -Class Win32_Battery | Select-Object -First 1 -ExpandProperty BatteryStatus) 2>$null",
-        ])
-        .output()
-    {
-        Ok(output) => {
-            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            // Empty string → no battery found → assume AC power.
-            !s.is_empty() && s != "2"
-        }
-        Err(_) => false,
+    // Native Win32 probe — never spawn PowerShell (GUI builds flash a console otherwise).
+    // ACLineStatus: 0 = offline (battery), 1 = online (AC), 255 = unknown.
+    #[repr(C)]
+    struct SystemPowerStatus {
+        ac_line_status: u8,
+        battery_flag: u8,
+        battery_life_percent: u8,
+        system_status_flag: u8,
+        battery_life_time: u32,
+        battery_full_life_time: u32,
     }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+
+    let mut status = SystemPowerStatus {
+        ac_line_status: 255,
+        battery_flag: 0,
+        battery_life_percent: 0,
+        system_status_flag: 0,
+        battery_life_time: 0,
+        battery_full_life_time: 0,
+    };
+    let ok = unsafe { GetSystemPowerStatus(&mut status) } != 0;
+    if !ok {
+        return false;
+    }
+    status.ac_line_status == 0
 }
 
 /// Managed state wrapper for use with Tauri's state system.

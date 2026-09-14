@@ -520,6 +520,7 @@ async fn run_script(
     use tokio::io::AsyncWriteExt;
     use std::process::Stdio;
 
+    crate::windows_spawn::hide_console_tokio(&mut cmd);
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

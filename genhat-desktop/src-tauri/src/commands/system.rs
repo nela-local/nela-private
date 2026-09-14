@@ -151,9 +151,10 @@ pub fn open_path_in_os(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
-            .spawn()
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &path]);
+        crate::windows_spawn::hide_console_std(&mut cmd);
+        cmd.spawn()
             .map_err(|e| format!("Failed to open file: {e}"))?;
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
