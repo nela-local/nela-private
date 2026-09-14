@@ -114,7 +114,7 @@ export async function runPptxArtifactOps(
   updateEditMsg("CrunchingMetrics");
 
   const useCloud = willRouteToCloud();
-  const theme = parsed.theme ?? "midnight";
+  const theme = parsed.theme ?? "minimal";
   const inventory = summarizeSlides(parsed.slides as Record<string, unknown>[]);
 
   const systemPrompt = `You edit existing PowerPoint / NELA slide decks surgically.

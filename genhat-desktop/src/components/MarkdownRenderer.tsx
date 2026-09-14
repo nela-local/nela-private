@@ -12,6 +12,7 @@ import { Api } from "../api";
 import type { SearchHit } from "../types";
 import { SourceCitation } from "./SourceCitation";
 import { tryParseChartPayload } from "../prompts/chartPrompt";
+import { stripTrailingSourcesSection } from "./markdownPrep";
 
 const ChartViewer = lazy(() =>
   import("./ChartViewer").then((m) => ({ default: m.ChartViewer }))
@@ -122,16 +123,6 @@ const CopyButton: React.FC<{ text: string }> = ({ text }) => {
     </button>
   );
 };
-
-/** Drop trailing "Sources" dump — citations render as inline icons instead. */
-function stripTrailingSourcesSection(md: string): string {
-  return md
-    .replace(
-      /\n{1,3}(?:#{1,6}\s*|\*\*|__)?Sources(?:\*\*|__)?\s*(?:\n|:)?[\s\S]*$/i,
-      ""
-    )
-    .trimEnd();
-}
 
 const CITE_URL_PREFIX = "cite-url://";
 

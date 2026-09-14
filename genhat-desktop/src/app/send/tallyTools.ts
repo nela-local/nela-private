@@ -1,0 +1,288 @@
+/**
+ * Host-side Tally tools: confirm in chat, then read-only XML exports.
+ */
+
+import { Api } from "../../api";
+import {
+  cancelTallyAccessConfirm,
+  openTallyAccessConfirm,
+  type TallyAccessKind,
+} from "../../stores/tallyAccessConfirmStore";
+
+function clampMax(raw: unknown, fallback: number, hardMax: number): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.max(1, Math.min(hardMax, Math.floor(raw)));
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n)) return Math.max(1, Math.min(hardMax, n));
+  }
+  return fallback;
+}
+
+function purposeOf(args: Record<string, unknown>, fallback: string): string {
+  const raw = args.purpose;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : fallback;
+}
+
+function optStr(args: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = args[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+async function withConfirm<T>(
+  kind: TallyAccessKind,
+  request: {
+    purpose: string;
+    group?: string | null;
+    fromDate?: string | null;
+    toDate?: string | null;
+    voucherType?: string | null;
+    maxRows?: number;
+  },
+  run: () => Promise<T>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+    waitingLabel: string;
+    runningLabel: string;
+  }
+): Promise<T | { ok: false; reason: string }> {
+  if (options?.signal?.aborted) {
+    return { ok: false, reason: "user_cancelled" };
+  }
+
+  const { isTallySessionTrusted } = await import(
+    "../../stores/tallyAccessConfirmStore"
+  );
+  const trusted = isTallySessionTrusted();
+
+  if (!trusted) {
+    options?.onStatus?.(options.waitingLabel);
+  }
+  const onAbort = () => {
+    cancelTallyAccessConfirm();
+  };
+  options?.signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    if (trusted) {
+      options?.onStatus?.(options.runningLabel);
+      const result = await run();
+      options?.onStatus?.(null);
+      return result;
+    }
+
+    const decision = await openTallyAccessConfirm({
+      kind,
+      purpose: request.purpose,
+      group: request.group ?? null,
+      fromDate: request.fromDate ?? null,
+      toDate: request.toDate ?? null,
+      voucherType: request.voucherType ?? null,
+      maxRows: request.maxRows,
+    });
+    if (!decision.confirmed) {
+      options?.onStatus?.(null);
+      return { ok: false, reason: "user_cancelled" };
+    }
+
+    options?.onStatus?.(options.runningLabel);
+    const result = await run();
+    options?.onStatus?.(null);
+    return result;
+  } catch (err) {
+    options?.onStatus?.(null);
+    const message =
+      typeof err === "string"
+        ? err
+        : err instanceof Error
+          ? err.message
+          : "Tally request failed.";
+    return { ok: false, reason: message };
+  } finally {
+    options?.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+export async function executeTallyListLedgers(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const group = optStr(args, "group", "parent");
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 100, 200);
+  const purpose = purposeOf(
+    args,
+    group ? `List Tally ledgers under “${group}”` : "List Tally ledgers"
+  );
+  return withConfirm(
+    "list_ledgers",
+    { purpose, group, maxRows },
+    () => Api.tallyListLedgers({ group, maxRows }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow Tally ledger export…",
+      runningLabel: "Reading ledgers from Tally…",
+    }
+  );
+}
+
+export async function executeTallyTrialBalance(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const fromDate = optStr(args, "from_date", "fromDate", "from");
+  const toDate = optStr(args, "to_date", "toDate", "to");
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 150, 200);
+  const purpose = purposeOf(args, "Export Tally trial balance");
+  return withConfirm(
+    "trial_balance",
+    { purpose, fromDate, toDate, maxRows },
+    () => Api.tallyTrialBalance({ fromDate, toDate, maxRows }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow trial balance export…",
+      runningLabel: "Reading trial balance from Tally…",
+    }
+  );
+}
+
+export async function executeTallyDaybook(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const fromDate = optStr(args, "from_date", "fromDate", "from");
+  const toDate = optStr(args, "to_date", "toDate", "to");
+  const voucherType = optStr(args, "voucher_type", "voucherType");
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 80, 100);
+  const purpose = purposeOf(args, "Export Tally day book");
+  return withConfirm(
+    "daybook",
+    { purpose, fromDate, toDate, voucherType, maxRows },
+    () =>
+      Api.tallyDaybook({
+        fromDate,
+        toDate,
+        voucherType,
+        maxRows,
+      }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow day book export…",
+      runningLabel: "Reading day book from Tally…",
+    }
+  );
+}
+
+export async function executeTallyOutstanding(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 40, 100);
+  const purpose = purposeOf(
+    args,
+    "Export Tally receivables and payables (Sundry Debtors / Creditors)"
+  );
+  return withConfirm(
+    "outstanding",
+    { purpose, maxRows },
+    () => Api.tallyOutstanding({ maxRows }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow outstanding export…",
+      runningLabel: "Reading outstanding from Tally…",
+    }
+  );
+}
+
+export async function executeTallyLiveDashboard(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+    onArtifact?: (artifact: {
+      path: string;
+      kind: string;
+      warning?: string | null;
+    }) => void;
+  }
+): Promise<
+  | { ok: true; path: string; kind: string; live: true }
+  | { ok: false; reason: string }
+> {
+  const fromDate = optStr(args, "from_date", "fromDate", "from");
+  const toDate = optStr(args, "to_date", "toDate", "to");
+  const title =
+    optStr(args, "title") || "Live Tally Dashboard";
+  const focusRaw = optStr(args, "focus") || "daybook";
+  const focus =
+    focusRaw === "outstanding" || focusRaw === "trial_balance"
+      ? focusRaw
+      : "daybook";
+  const purpose = purposeOf(
+    args,
+    "Open a live Tally dashboard that refreshes from your local HTTP server"
+  );
+
+  return withConfirm(
+    "live_dashboard",
+    { purpose, fromDate, toDate },
+    async () => {
+      options?.onStatus?.("Building live Tally dashboard…");
+      const status = await Api.tallyStatus();
+      if (!status.connected) {
+        throw new Error(
+          "Tally is not connected. Connect in Settings first (HTTP on localhost)."
+        );
+      }
+      const { buildTallyLiveDashboardHtml } = await import(
+        "../tallyLiveDashboard"
+      );
+      const html = buildTallyLiveDashboardHtml({
+        title,
+        fromDate,
+        toDate,
+        focus,
+        companyHint: status.company,
+        hostHint: status.host,
+        portHint: status.port ?? undefined,
+      });
+      const artifact = await Api.generateHtml({
+        title,
+        archetype: "landing",
+        sections: [],
+        html,
+        output_name: title,
+      });
+      options?.onArtifact?.(artifact);
+      options?.onStatus?.(null);
+      return {
+        ok: true as const,
+        path: artifact.path,
+        kind: artifact.kind ?? "html",
+        live: true as const,
+      };
+    },
+    {
+      signal: options?.signal,
+      onStatus: options?.onStatus,
+      waitingLabel: "Waiting for you to allow the live Tally dashboard…",
+      runningLabel: "Opening live Tally dashboard…",
+    }
+  );
+}

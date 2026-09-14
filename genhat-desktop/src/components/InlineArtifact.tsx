@@ -216,6 +216,16 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
     };
   }, [currentPath]);
 
+  // Live Tally dashboard bridge for inline HTML preview
+  useEffect(() => {
+    if (!artifactHtml || !/data-nela-tally-live/i.test(artifactHtml)) return;
+    let detach: (() => void) | undefined;
+    void import("../app/tallyLiveBridge").then(({ attachTallyLiveBridge }) => {
+      detach = attachTallyLiveBridge(() => iframeRef.current?.contentWindow ?? null);
+    });
+    return () => detach?.();
+  }, [artifactHtml]);
+
   const filename = currentPath ? currentPath.split(/[/\\]/).pop() : "artifact";
   const isHtml = currentPath ? (currentPath.endsWith(".html") || currentPath.endsWith(".htm")) : false;
   const isSpreadsheet = currentPath ? (currentPath.endsWith(".xlsx") || currentPath.endsWith(".xls") || currentPath.endsWith(".csv")) : false;

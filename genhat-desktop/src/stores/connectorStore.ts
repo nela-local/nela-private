@@ -23,6 +23,7 @@ import type {
 import { friendlyErrorFromUnknown } from "../app/friendlyError";
 import { useGmailStore } from "./gmailStore";
 import { useTelegramStore } from "./telegramStore";
+import { useTallyStore } from "./tallyStore";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -45,6 +46,15 @@ function syncTelegramStoreFromConnections(connections: ConnectorConnection[]) {
     connected: Boolean(telegram),
     username: telegram?.accountEmail ?? null,
   });
+}
+
+function syncTallyStoreFromConnections(connections: ConnectorConnection[]) {
+  const tally = connections.find((c) => c.providerId === "tally");
+  if (tally) {
+    useTallyStore.setState({ connected: true });
+  } else {
+    useTallyStore.setState({ connected: false });
+  }
 }
 
 type ConnectorStore = {
@@ -90,6 +100,7 @@ function resolveConnectFlow(
   const info = providers.find((p) => p.id === provider);
   if (info?.connectFlow) return info.connectFlow;
   if (provider === "telegram") return "telegram_mtproto";
+  if (provider === "tally") return "tally_localhost";
   if (provider === "local") return "none";
   // Gmail + Drive sign in through the cloud OAuth broker.
   if (provider === "gmail" || provider === "gdrive") return "cloud_broker";
@@ -127,6 +138,7 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
       ]);
       syncGmailStoreFromConnections(connections);
       syncTelegramStoreFromConnections(connections);
+      syncTallyStoreFromConnections(connections);
       set({ providers, connections, indexedRoots, error: null });
     } catch (e) {
       set({ error: friendlyErrorFromUnknown(e) });
@@ -166,6 +178,12 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
 
       if (flow === "telegram_mtproto") {
         useTelegramStore.getState().openWizard();
+        set({ busy: false, connectingProviderId: null });
+        return null;
+      }
+
+      if (flow === "tally_localhost") {
+        useTallyStore.getState().openWizard();
         set({ busy: false, connectingProviderId: null });
         return null;
       }
@@ -230,7 +248,17 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
   disconnect: async (connectionId, wipeMirror = true) => {
     set({ busy: true, error: null });
     try {
+      const wasTally =
+        connectionId === "tally" ||
+        get().connections.find((c) => c.id === connectionId)?.providerId ===
+          "tally";
       await connectorsDisconnect(connectionId, wipeMirror);
+      if (wasTally) {
+        const { clearTallySessionTrust } = await import(
+          "./tallyAccessConfirmStore"
+        );
+        clearTallySessionTrust();
+      }
       await get().refresh();
     } catch (e) {
       set({ error: friendlyErrorFromUnknown(e) });

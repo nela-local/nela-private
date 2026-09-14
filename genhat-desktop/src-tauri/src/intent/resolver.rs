@@ -5,7 +5,7 @@
 //!
 //! | Tier | Mechanism                  | Budget   | When used                          |
 //! |------|----------------------------|----------|------------------------------------|
-//! | 0    | Deterministic              | < 1 ms   | Slash commands, UI mode, keywords  |
+//! | 0    | Deterministic              | < 1 ms   | Slash commands, UI mode, attached-file dashboard |
 //! | 1    | ONNX DistilBERT classifier | 10–30 ms | All other requests                 |
 //! | 2    | SLM fallback (warm only)   | ≤250 ms  | Tier 1 confidence < threshold      |
 //!
@@ -109,30 +109,15 @@ impl IntentResolver {
             }
         }
 
-        // High-signal natural-language triggers (only the most unambiguous phrases).
+        // Attached workbook + dashboard/chart language → HTML.
+        // Do NOT keyword-route bare "generate … table/presentation/html" prompts
+        // into artifact mode — that hijacks ordinary chat (and used to kick off
+        // host-side file_search). New artifacts come from slash commands, explicit
+        // UI intent, or LLM tool calls only.
         let lower = trimmed.to_lowercase();
-        // Attached workbook + dashboard/chart language → HTML (before excel synthesis).
         if extra_flag_true(extra, "has_spreadsheet_attach")
             && matches_spreadsheet_dashboard_trigger(&lower)
         {
-            return Some(IntentDecision::artifact(
-                "mcp-server-html",
-                "html_synthesis",
-            ));
-        }
-        if matches_artifact_trigger_excel(&lower) {
-            return Some(IntentDecision::artifact(
-                "mcp-server-excel",
-                "spreadsheet_synthesis",
-            ));
-        }
-        if matches_artifact_trigger_presentation(&lower) {
-            return Some(IntentDecision::artifact(
-                "mcp-server-presentation",
-                "presentation_synthesis",
-            ));
-        }
-        if matches_artifact_trigger_html(&lower) {
             return Some(IntentDecision::artifact(
                 "mcp-server-html",
                 "html_synthesis",
@@ -656,6 +641,18 @@ mod tests {
     fn make_dashboard_without_attach_is_not_html_trigger() {
         assert!(!matches_artifact_trigger_html("make a dashboard"));
         assert!(matches_spreadsheet_dashboard_trigger("make a dashboard"));
+    }
+
+    #[test]
+    fn valuation_style_prompt_matches_excel_helper_only() {
+        // "generate" + "table" matches the excel helper, but tier0 no longer
+        // routes NL creation — only slash / UI intent / spreadsheet-attach.
+        let lower = "Perform targeted web research. Search and integrate \
+            benchmark data. Generate a docx with Markdown tables."
+            .to_lowercase();
+        assert!(matches_artifact_trigger_excel(&lower));
+        assert!(!matches_artifact_trigger_presentation(&lower));
+        assert!(!matches_artifact_trigger_html(&lower));
     }
 
     #[test]

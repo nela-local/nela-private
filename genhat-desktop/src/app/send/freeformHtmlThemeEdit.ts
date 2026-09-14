@@ -47,12 +47,12 @@ export function fiveTokenToFreeform(p: FiveTokenPalette): FreeformThemePalette {
   };
 }
 
-/** Default bluish dark split-complementary palette. */
+/** Default bluish light split-complementary palette (product default tone). */
 export const BLUISH_GRADIENT_PALETTE: FreeformThemePalette = fiveTokenToFreeform(
   buildThemePalette({
     label: "blue",
     brandHue: 250,
-    tone: "dark",
+    tone: "light",
     harmony: "splitComplementary",
   })
 );
@@ -138,7 +138,7 @@ export function complementaryTextForBg(bgHex: string): {
   const p = buildThemePalette({
     label: "derived",
     brandHue: 250,
-    tone: "dark",
+    tone: "light",
     harmony: "splitComplementary",
   });
   void bgHex;

@@ -51,4 +51,8 @@ When you DO emit an artifact, chat copy is mandatory (Claude-style):
 2. INSIDE the tag: only the file body (HTML or CSV) — no commentary.
 3. AFTER the closing tag: 2–4 sentences summarizing what is inside, key caveats, and what the user can ask next.
 Never leave the chat bubble empty. Never write the words "nela-artifact" in prose or fake tags like **nela-artifact type=...**.
-If answering in normal markdown with no file, do not mention this protocol at all.`;
+If answering in normal markdown with no file, do not mention this protocol at all.
+
+HTML / slide design when emitting text/html:
+- Default to LIGHT backgrounds (white / soft cream / pale gray) with dark readable text. Avoid dark-mode decks/pages unless the user asks for dark mode.
+- Prefer substantial plain-language copy a non-expert can follow: detailed bullets or short paragraphs, concrete examples, clear takeaways — not sparse title-only slides.`;

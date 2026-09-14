@@ -12,6 +12,7 @@ import AudioSidebar from "./components/AudioSidebar";
 import MindmapsSidebar from "./components/MindmapsSidebar";
 import PlaygroundSidebar from "./components/PlaygroundSidebar";
 import StartupModelToast from "./components/StartupModelToast";
+import AppUpdateToast from "./components/AppUpdateToast";
 import AppMainContent from "./components/AppMainContent";
 import AppDialogsLayer from "./components/AppDialogsLayer";
 import AppRightSidebar from "./components/AppRightSidebar";
@@ -235,6 +236,7 @@ function App() {
 
         <AppMainContent />
         <StartupModelToast />
+        <AppUpdateToast />
         <AppRightSidebar />
       </div>
     </div>

@@ -402,6 +402,7 @@ fn main() {
             app_lib::commands::doc_graph::get_knowledge_base_stats,
             app_lib::commands::doc_graph::get_background_index_status,
             app_lib::commands::doc_graph::clear_knowledge_base,
+            app_lib::commands::local_shell::local_shell_run,
             // Media retrieval commands
             app_lib::commands::rag::retrieve_media_for_response,
             app_lib::commands::rag::get_media_for_document,
@@ -500,6 +501,16 @@ fn main() {
             app_lib::commands::drive::drive_search,
             app_lib::commands::drive::drive_list_recent,
             app_lib::commands::drive::drive_get,
+            // TallyPrime read-only (localhost XML HTTP)
+            app_lib::commands::tally::tally_status,
+            app_lib::commands::tally::tally_connect,
+            app_lib::commands::tally::tally_disconnect,
+            app_lib::commands::tally::tally_ping,
+            app_lib::commands::tally::tally_scan_ports,
+            app_lib::commands::tally::tally_list_ledgers,
+            app_lib::commands::tally::tally_trial_balance,
+            app_lib::commands::tally::tally_daybook,
+            app_lib::commands::tally::tally_outstanding,
             // Cloud storage connectors (File Indexer mirrors)
             app_lib::commands::connectors::connectors_list_providers,
             app_lib::commands::connectors::connectors_list_connections,

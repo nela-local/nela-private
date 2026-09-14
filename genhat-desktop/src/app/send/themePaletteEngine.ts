@@ -103,11 +103,20 @@ export function parseBrandFromPrompt(prompt: string): {
   return { hue, label: "custom" };
 }
 
+/**
+ * Infer canvas tone from the user prompt.
+ * Product policy: LIGHT by default; DARK only on explicit theme intent.
+ * Avoid false positives like "dark patterns" or "in the dark".
+ */
 export function parseToneFromPrompt(prompt: string): ThemeTone {
   const lower = prompt.toLowerCase();
-  if (/\b(light|minimal|white|bright\s+mode|day)\b/.test(lower)) return "light";
-  if (/\b(dark|midnight|night)\b/.test(lower)) return "dark";
-  return "dark";
+  const wantsDark =
+    /\b(dark\s*(?:mode|theme|deck|slides?|background|palette|ui|design)|midnight|night\s*mode|neon(?:\s*(?:theme|deck|mode|ui))?|cyber(?:punk)?(?:\s*(?:theme|deck|mode))?)\b/.test(
+      lower
+    ) ||
+    /\b(make\s+it\s+dark|use\s+a?\s*dark|switch\s+to\s+dark)\b/.test(lower);
+  if (wantsDark) return "dark";
+  return "light";
 }
 
 export function parseHarmonyFromPrompt(prompt: string): HarmonyMode {

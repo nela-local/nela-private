@@ -117,6 +117,41 @@ export const SEARCH_KNOWLEDGE_BASE_TOOL: CloudToolDefinition = {
 /** @deprecated Use SEARCH_KNOWLEDGE_BASE_TOOL */
 export const FILE_SEARCH_TOOL = SEARCH_KNOWLEDGE_BASE_TOOL;
 
+/**
+ * Allowlisted local shell for reading files the knowledge base already surfaced.
+ * Gated with fileSearchEnabled (same as search_knowledge_base).
+ */
+export const LOCAL_SHELL_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "local_shell",
+    description:
+      "Run a single allowlisted read-only command on the user's machine to inspect files after search_knowledge_base returns absolute paths. " +
+      "Allowed programs only: ls, cat, head, tail, wc, grep, rg, find (find without -exec/-delete). " +
+      "Pass argv as a JSON array of strings — never a shell string, pipes, redirects, or bash/sh -c. " +
+      "Typical flow: search_knowledge_base → then local_shell with cat/head/grep on the absolute path. " +
+      "Do NOT use for write/delete/network. Do NOT invent paths — use paths from tool results or the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        argv: {
+          type: "array",
+          description:
+            'Argv array, e.g. ["cat","/home/user/Documents/notes.txt"] or ["head","-n","40","/abs/path"].',
+          items: { type: "string" },
+          minItems: 1,
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional working directory for relative paths. Prefer absolute paths in argv instead.",
+        },
+      },
+      required: ["argv"],
+    },
+  },
+};
+
 /** MCP / native artifact writers exposed as OpenAI tools (executed on desktop). */
 export const MCP_SPREADSHEET_TOOL: CloudToolDefinition = {
   type: "function",
@@ -171,18 +206,22 @@ export const MCP_PRESENTATION_TOOL: CloudToolDefinition = {
   function: {
     name: "generate_presentation",
     description:
-      "Create a presentation / slide deck on the user's device. Prefer passing a complete self-contained HTML document in `html` (full creative control over design and dense slide content). " +
-      "Alternatively pass structured `slides` for the legacy template renderer. Honor the user's exact topic.",
+      "Create a presentation / slide deck on the user's device. Prefer passing a complete self-contained HTML document in `html` (light, readable design with detailed plain-language slide copy for non-tech users). " +
+      "Use light backgrounds (white/cream) with dark text unless the user asks for dark mode. Alternatively pass structured `slides` for the legacy template renderer. Honor the user's exact topic.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string" },
-        theme: { type: "string" },
+        theme: {
+          type: "string",
+          description:
+            "Prefer light themes: minimal, academic, corporate. Use midnight/cyber/neon only if the user asks for dark mode.",
+        },
         output_name: { type: "string" },
         html: {
           type: "string",
           description:
-            "Full self-contained HTML presentation document (preferred). Includes CSS/JS for slide navigation.",
+            "Full self-contained HTML presentation (preferred). Light backgrounds, dark text, substantial slide copy — not sparse titles.",
         },
         slides: {
           type: "array",
@@ -200,14 +239,32 @@ export const MCP_HTML_TOOL: CloudToolDefinition = {
   function: {
     name: "generate_html",
     description:
-      "Create an HTML page or interactive HTML artifact on the user's device from a structured plan.",
+      "Create an HTML page or dashboard on the user's device. Prefer a light readable design. " +
+      "For dashboards: pass compact freeform `html` with <div data-nela-chart=\"nela-chart:N\"></div> markers " +
+      "from prior render_chart calls, OR structured `sections`. Keep HTML under ~100KB — summarize tables, do not dump full ledgers. " +
+      "Do not invent Chart.js.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string" },
-        theme: { type: "string" },
+        theme: {
+          type: "string",
+          description:
+            "Prefer light themes: minimal, corporate, paper, academic. Dark themes only if requested.",
+        },
+        html: {
+          type: "string",
+          description:
+            "Optional full HTML document (preferred for custom dashboards). Keep compact; use nela-chart markers for plots.",
+        },
+        sections: {
+          type: "array",
+          description: "Optional structured sections when not passing html.",
+          items: { type: "object" },
+        },
         pages: {
           type: "array",
+          description: "Deprecated alias for sections.",
           items: { type: "object" },
         },
       },
@@ -558,6 +615,142 @@ export const DRIVE_GET_TOOL: CloudToolDefinition = {
   },
 };
 
+/** Read-only TallyPrime status (no confirm needed). */
+export const TALLY_STATUS_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_status",
+    description:
+      "Check whether TallyPrime is connected in NELA (localhost XML HTTP). Returns host, port, company, and last error. Call before other tally_* tools if unsure.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+};
+
+export const TALLY_LIST_LEDGERS_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_list_ledgers",
+    description:
+      "Export ledgers from the connected Tally company (read-only). Optional group/parent filter (e.g. Sundry Debtors). User must approve each export. Use for balances and dashboard KPIs.",
+    parameters: {
+      type: "object",
+      properties: {
+        group: {
+          type: "string",
+          description: "Parent group name (CHILD OF), e.g. Sundry Debtors.",
+        },
+        max_rows: {
+          type: "integer",
+          description: "Max ledgers to return (1–200, default 100).",
+        },
+        purpose: {
+          type: "string",
+          description: "Short reason shown on the allow card.",
+        },
+      },
+      required: [],
+    },
+  },
+};
+
+export const TALLY_TRIAL_BALANCE_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_trial_balance",
+    description:
+      "Export Trial Balance from Tally (read-only). Optional from_date / to_date (Tally date strings). User must approve. Good for overview dashboards.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string", description: "Period start (e.g. 1-Apr-2026)." },
+        to_date: { type: "string", description: "Period end." },
+        max_rows: { type: "integer", description: "Max rows (1–200)." },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
+export const TALLY_DAYBOOK_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_daybook",
+    description:
+      "Export Day Book vouchers from Tally (read-only) for a date range. Optional voucher_type filter. Capped rows. User must approve.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string" },
+        to_date: { type: "string" },
+        voucher_type: {
+          type: "string",
+          description: "e.g. Sales, Purchase, Payment, Receipt.",
+        },
+        max_rows: { type: "integer", description: "Max vouchers (1–100)." },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
+export const TALLY_OUTSTANDING_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_outstanding",
+    description:
+      "Export receivables (Sundry Debtors) and payables (Sundry Creditors) ledger balances from Tally (read-only). Ideal for outstanding / aging-style dashboards. User must approve.",
+    parameters: {
+      type: "object",
+      properties: {
+        max_rows: {
+          type: "integer",
+          description: "Max ledgers per side (1–100).",
+        },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
+export const TALLY_LIVE_DASHBOARD_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_live_dashboard",
+    description:
+      "Open a LIVE Tally dashboard artifact in NELA (KPIs + charts that Refresh from Tally via the host). " +
+      "Use this for any visualization / dashboard / chart request about Tally — do NOT bake voucher tables into generate_html. " +
+      "User allows once; the page refreshes live while Tally HTTP is running.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Dashboard title" },
+        from_date: {
+          type: "string",
+          description: "Default from date (YYYY-MM-DD or YYYYMMDD)",
+        },
+        to_date: {
+          type: "string",
+          description: "Default to date (YYYY-MM-DD or YYYYMMDD)",
+        },
+        focus: {
+          type: "string",
+          enum: ["daybook", "outstanding", "trial_balance"],
+          description: "Initial report tab",
+        },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
 export function buildCloudChatTools(options?: {
   webEnabled?: boolean;
   fileSearchEnabled?: boolean;
@@ -572,10 +765,14 @@ export function buildCloudChatTools(options?: {
   telegramEnabled?: boolean;
   /** Google Drive search/recent/get when Drive is connected. */
   driveEnabled?: boolean;
+  /** TallyPrime read-only tools when connected. */
+  tallyEnabled?: boolean;
 }): CloudToolDefinition[] {
   const tools: CloudToolDefinition[] = [];
   if (options?.webEnabled) tools.push(WEB_SEARCH_TOOL, WEB_EXTRACT_TOOL);
-  if (options?.fileSearchEnabled) tools.push(SEARCH_KNOWLEDGE_BASE_TOOL);
+  if (options?.fileSearchEnabled) {
+    tools.push(SEARCH_KNOWLEDGE_BASE_TOOL, LOCAL_SHELL_TOOL);
+  }
   if (options?.chartEnabled) tools.push(RENDER_CHART_TOOL);
   if (options?.mcpEnabled) tools.push(...MCP_CLOUD_TOOLS);
   if (options?.askFollowUpEnabled !== false) tools.push(ASK_FOLLOWUP_TOOL);
@@ -587,6 +784,16 @@ export function buildCloudChatTools(options?: {
   }
   if (options?.driveEnabled) {
     tools.push(DRIVE_SEARCH_TOOL, DRIVE_LIST_RECENT_TOOL, DRIVE_GET_TOOL);
+  }
+  if (options?.tallyEnabled) {
+    tools.push(
+      TALLY_STATUS_TOOL,
+      TALLY_LIST_LEDGERS_TOOL,
+      TALLY_TRIAL_BALANCE_TOOL,
+      TALLY_DAYBOOK_TOOL,
+      TALLY_OUTSTANDING_TOOL,
+      TALLY_LIVE_DASHBOARD_TOOL
+    );
   }
   return tools;
 }

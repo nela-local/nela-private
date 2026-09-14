@@ -523,6 +523,28 @@ export const Api = {
     });
   },
 
+  /**
+   * Allowlisted local shell (ls/cat/grep/rg/head/tail/wc/find) for deep-read
+   * after knowledge-base search. Argv only — never a shell string.
+   */
+  async localShellRun(
+    argv: string[],
+    cwd?: string | null
+  ): Promise<{
+    ok: boolean;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    truncated: boolean;
+    command: string;
+    error?: string | null;
+  }> {
+    return invoke("local_shell_run", {
+      argv,
+      cwd: cwd ?? null,
+    });
+  },
+
   async getKnowledgeBaseStats(): Promise<import("./types").DocGraphStats> {
     return invoke<import("./types").DocGraphStats>("get_knowledge_base_stats");
   },
@@ -1513,6 +1535,166 @@ export const Api = {
   async driveGet(input: { fileId: string }): Promise<DriveGetResult> {
     return invoke<DriveGetResult>("drive_get", {
       fileId: input.fileId,
+    });
+  },
+
+  async tallyStatus(): Promise<{
+    connected: boolean;
+    host?: string | null;
+    port?: number | null;
+    company?: string | null;
+    lastError?: string | null;
+  }> {
+    return invoke("tally_status");
+  },
+
+  async tallyConnect(input: {
+    host: string;
+    port: number;
+    company?: string | null;
+  }): Promise<{
+    connected: boolean;
+    host?: string | null;
+    port?: number | null;
+    company?: string | null;
+    lastError?: string | null;
+  }> {
+    return invoke("tally_connect", {
+      host: input.host,
+      port: input.port,
+      company: input.company ?? null,
+    });
+  },
+
+  async tallyDisconnect(): Promise<{
+    connected: boolean;
+    host?: string | null;
+    port?: number | null;
+    company?: string | null;
+    lastError?: string | null;
+  }> {
+    return invoke("tally_disconnect");
+  },
+
+  async tallyPing(): Promise<{
+    connected: boolean;
+    host?: string | null;
+    port?: number | null;
+    company?: string | null;
+    lastError?: string | null;
+  }> {
+    return invoke("tally_ping");
+  },
+
+  async tallyScanPorts(input?: { host?: string | null }): Promise<{
+    ok: boolean;
+    host: string;
+    ports: number[];
+    scanned: number;
+    error?: string | null;
+  }> {
+    return invoke("tally_scan_ports", {
+      host: input?.host ?? null,
+    });
+  },
+
+  async tallyListLedgers(input?: {
+    group?: string | null;
+    maxRows?: number | null;
+  }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    ledgers: Array<{
+      name: string;
+      parent?: string | null;
+      closingBalance?: string | null;
+    }>;
+    truncated: boolean;
+    error?: string | null;
+  }> {
+    return invoke("tally_list_ledgers", {
+      group: input?.group ?? null,
+      maxRows: input?.maxRows ?? null,
+    });
+  },
+
+  async tallyTrialBalance(input?: {
+    fromDate?: string | null;
+    toDate?: string | null;
+    maxRows?: number | null;
+  }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    fromDate?: string | null;
+    toDate?: string | null;
+    rows: Array<{
+      name: string;
+      parent?: string | null;
+      closingBalance?: string | null;
+    }>;
+    truncated: boolean;
+    error?: string | null;
+  }> {
+    return invoke("tally_trial_balance", {
+      fromDate: input?.fromDate ?? null,
+      toDate: input?.toDate ?? null,
+      maxRows: input?.maxRows ?? null,
+    });
+  },
+
+  async tallyDaybook(input?: {
+    fromDate?: string | null;
+    toDate?: string | null;
+    voucherType?: string | null;
+    maxRows?: number | null;
+  }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    fromDate?: string | null;
+    toDate?: string | null;
+    lines: Array<{
+      date?: string | null;
+      voucherType?: string | null;
+      party?: string | null;
+      amount?: string | null;
+      narration?: string | null;
+    }>;
+    truncated: boolean;
+    error?: string | null;
+  }> {
+    return invoke("tally_daybook", {
+      fromDate: input?.fromDate ?? null,
+      toDate: input?.toDate ?? null,
+      voucherType: input?.voucherType ?? null,
+      maxRows: input?.maxRows ?? null,
+    });
+  },
+
+  async tallyOutstanding(input?: { maxRows?: number | null }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    receivables: {
+      group: string;
+      count: number;
+      ledgers: Array<{
+        name: string;
+        parent?: string | null;
+        closingBalance?: string | null;
+      }>;
+    };
+    payables: {
+      group: string;
+      count: number;
+      ledgers: Array<{
+        name: string;
+        parent?: string | null;
+        closingBalance?: string | null;
+      }>;
+    };
+    error?: string | null;
+  }> {
+    return invoke("tally_outstanding", {
+      maxRows: input?.maxRows ?? null,
     });
   },
 };

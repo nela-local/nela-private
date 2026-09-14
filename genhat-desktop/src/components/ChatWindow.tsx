@@ -28,6 +28,9 @@ import TelegramSendConfirmCard from "./TelegramSendConfirmCard";
 import TelegramReadConfirmCard from "./TelegramReadConfirmCard";
 import DriveConnectCard from "./DriveConnectCard";
 import DriveAccessConfirmCard from "./DriveAccessConfirmCard";
+import TallyAccessConfirmCard from "./TallyAccessConfirmCard";
+import ToolActivityTimeline from "./ToolActivityTimeline";
+import ReasoningDisclosure from "./ReasoningDisclosure";
 import { useGmailSendConfirmStore } from "../stores/gmailSendConfirmStore";
 import { useGmailReadConfirmStore } from "../stores/gmailReadConfirmStore";
 import { useGmailConnectPromptStore } from "../stores/gmailConnectPromptStore";
@@ -36,11 +39,40 @@ import { useTelegramReadConfirmStore } from "../stores/telegramReadConfirmStore"
 import { useTelegramConnectPromptStore } from "../stores/telegramConnectPromptStore";
 import { useDriveAccessConfirmStore } from "../stores/driveAccessConfirmStore";
 import { useDriveConnectPromptStore } from "../stores/driveConnectPromptStore";
-import ReasoningDisclosure from "./ReasoningDisclosure";
+import { useTallyAccessConfirmStore } from "../stores/tallyAccessConfirmStore";
 import { scrubChatArtifactProtocol } from "../app/streamArtifactParser";
 import { useNelaLogoSrc } from "../hooks/useTheme";
+import { useChatFileDrop } from "../hooks/useChatFileDrop";
 import "./ModeBanner.css";
 import "./WebSearchDisclosure.css";
+
+function ChatDropOverlay({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[60] flex items-center justify-center rounded-2xl bg-void-900/70 backdrop-blur-[2px]"
+      aria-hidden
+    >
+      <div className="mx-6 flex max-w-md flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-neon/70 bg-void-800/90 px-8 py-10 text-center shadow-[0_0_40px_rgba(0,212,255,0.12)]">
+        <svg
+          width="28"
+          height="28"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-neon"
+        >
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+        </svg>
+        <p className="m-0 text-[1.05rem] font-semibold text-txt">{COPY.dropFilesTitle}</p>
+        <p className="m-0 text-[0.85rem] text-txt-muted">{COPY.dropFilesHint}</p>
+      </div>
+    </div>
+  );
+}
 
 function looksLikeArtifactDump(text: string): boolean {
   // Scrub protocol leaks first — a single bad tag line must not hide a useful reply.
@@ -120,8 +152,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   chatMode = "text",
   ttsGenerating = false,
   ttsElapsedTime = 0,
-  generalGenerating = false,
-  generalGenerationTime = null,
+  generalGenerating: _generalGenerating = false,
+  generalGenerationTime: _generalGenerationTime = null,
   ragDocs = [],
   ragIngesting = false,
   enrichmentStatus = null,
@@ -152,8 +184,11 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   session,
 }) => {
   const { advanced } = useAdvancedMode();
+  const dropEnabled = chatMode === "text" || chatMode === "vision";
+  const { dragActive } = useChatFileDrop(dropEnabled);
   const preferredMode = useCloudStore((s) => s.preferredMode);
   const liveToolStatus = useChatModeStore((s) => s.liveToolStatus);
+  const liveToolSteps = useChatModeStore((s) => s.liveToolSteps);
   const attachmentMetaByPath = useChatModeStore((s) => s.attachmentMetaByPath);
   const pdfEngineByPath = useChatModeStore((s) => s.pdfEngineByPath);
   const openConnectorsModal = useConnectorStore((s) => s.openModal);
@@ -168,6 +203,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const telegramReadConfirmPending = useTelegramReadConfirmStore((s) => s.pending);
   const telegramConnectPrompt = useTelegramConnectPromptStore((s) => s.visible);
   const driveAccessPending = useDriveAccessConfirmStore((s) => s.pending);
+  const tallyAccessPending = useTallyAccessConfirmStore((s) => s.pending);
   const driveConnectPrompt = useDriveConnectPromptStore((s) => s.visible);
   const logoSrc = useNelaLogoSrc();
 
@@ -239,13 +275,13 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   useEffect(() => {
     // Follow the live bubble while tokens stream. While only thinking/loading,
     // respect the user if they scrolled up to read history.
-    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !telegramConfirmPending && !telegramReadConfirmPending && !telegramConnectPrompt && !driveAccessPending && !driveConnectPrompt && !stickToBottomRef.current) return;
+    if (!streamingContent && !gmailConfirmPending && !gmailReadConfirmPending && !gmailConnectPrompt && !telegramConfirmPending && !telegramReadConfirmPending && !telegramConnectPrompt && !driveAccessPending && !driveConnectPrompt && !tallyAccessPending && !stickToBottomRef.current) return;
     const el = messagesParentRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt, telegramConfirmPending, telegramReadConfirmPending, telegramConnectPrompt, driveAccessPending, driveConnectPrompt]);
+  }, [messages.length, streamingContent, streamingThinking, isLoading, virtualTotalSize, gmailConfirmPending, gmailReadConfirmPending, gmailConnectPrompt, telegramConfirmPending, telegramReadConfirmPending, telegramConnectPrompt, driveAccessPending, driveConnectPrompt, tallyAccessPending]);
 
   // Close composer menus while a response is generating.
   if (isLoading && (showAttachMenu || showToolsMenu)) {
@@ -747,6 +783,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
 
     return (
       <div className="h-full flex-1 flex flex-col items-center justify-center relative px-6">
+        <ChatDropOverlay active={dragActive} />
         {/* Animated orb */}
         <div className="welcome-orb" />
 
@@ -763,7 +800,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
             {COPY.welcomeHint}
           </p>
           <p className="text-[0.85rem] text-txt-muted/80 m-0 mt-1">
-            Ask a question, or add documents with the <strong>+</strong> button.
+            Ask a question, attach with <strong>+</strong>, or drag files here.
           </p>
         </div>
 
@@ -815,7 +852,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
             </div>
           )}
 
-          <div className={`input-wrapper glass-strong flex flex-col gap-2 rounded-2xl px-2 py-2 transition-colors duration-150 focus-within:border-neon ${modeChatBorderClass}`}>
+          <div className={`input-wrapper glass-strong flex flex-col gap-2 rounded-2xl px-2 py-2 transition-colors duration-150 focus-within:border-neon ${modeChatBorderClass} ${dragActive ? "border-neon shadow-[0_0_24px_rgba(0,212,255,0.2)]" : ""}`}>
             {renderVisionAttachment()}
             {renderDirectDocumentAttachments()}
             <div className="flex items-center gap-2">
@@ -898,7 +935,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
 
   // ─── Normal Chat State ───
   return (
-    <div className="h-full flex-1 flex flex-col min-h-0">
+    <div className="h-full flex-1 flex flex-col min-h-0 relative">
+      <ChatDropOverlay active={dragActive} />
       <div
         ref={messagesParentRef}
         className="messages-area flex-1 overflow-y-auto px-6 py-4"
@@ -967,15 +1005,6 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
           })}
         </div>
 
-        <GmailConnectCard />
-        <GmailSendConfirmCard />
-        <GmailReadConfirmCard />
-        <TelegramConnectCard />
-        <TelegramSendConfirmCard />
-        <TelegramReadConfirmCard />
-        <DriveConnectCard />
-        <DriveAccessConfirmCard />
-
         {isLoading &&
           !messages.some(
             (m) =>
@@ -985,18 +1014,20 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
           ) && (
           <div className="flex gap-3 mb-5 max-w-3xl mx-auto items-start">
             <NelaLoadingIcon size={32} className="shrink-0" />
-            {liveToolStatus ||
+            {liveToolSteps.length > 0 ||
+            liveToolStatus ||
             streamingThinking.trim() ||
             (streamingContent && !looksLikeArtifactDump(streamingContent)) ? (
               <div className="flex-1 min-w-0 text-[0.9rem] leading-relaxed text-txt glass rounded-2xl rounded-tl-sm py-3 px-4">
-                {liveToolStatus && (
+                {streamingThinking.trim() ? (
+                  <ReasoningDisclosure thinking={streamingThinking} streaming />
+                ) : null}
+                <ToolActivityTimeline steps={liveToolSteps} />
+                {liveToolStatus && liveToolSteps.length === 0 ? (
                   <div className="web-search-live" role="status">
                     <span className="web-search-live__pulse" aria-hidden />
                     <span>{liveToolStatus}</span>
                   </div>
-                )}
-                {streamingThinking.trim() ? (
-                  <ReasoningDisclosure thinking={streamingThinking} streaming />
                 ) : null}
                 {streamingContent && !looksLikeArtifactDump(streamingContent) ? (
                   <MarkdownRenderer
@@ -1020,6 +1051,16 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
             )}
           </div>
         )}
+
+        <GmailConnectCard />
+        <GmailSendConfirmCard />
+        <GmailReadConfirmCard />
+        <TelegramConnectCard />
+        <TelegramSendConfirmCard />
+        <TelegramReadConfirmCard />
+        <DriveConnectCard />
+        <DriveAccessConfirmCard />
+        <TallyAccessConfirmCard />
 
         {/* Response Time Timer - Audio Mode */}
         {chatMode === "audio" && ttsGenerating && (
@@ -1084,7 +1125,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
           </div>
         )}
 
-          <div className={`input-wrapper glass-strong flex flex-col gap-2 rounded-2xl px-2 py-2 max-w-3xl mx-auto transition-all duration-200 shadow-[0_4px_24px_rgba(0,0,0,0.3)] focus-within:border-neon focus-within:shadow-[0_0_24px_rgba(0,212,255,0.15),0_4px_24px_rgba(0,0,0,0.3)] ${modeChatBorderClass}`}>
+          <div className={`input-wrapper glass-strong flex flex-col gap-2 rounded-2xl px-2 py-2 max-w-3xl mx-auto transition-all duration-200 shadow-[0_4px_24px_rgba(0,0,0,0.3)] focus-within:border-neon focus-within:shadow-[0_0_24px_rgba(0,212,255,0.15),0_4px_24px_rgba(0,0,0,0.3)] ${modeChatBorderClass} ${dragActive ? "border-neon shadow-[0_0_24px_rgba(0,212,255,0.25),0_4px_24px_rgba(0,0,0,0.3)]" : ""}`}>
             {renderVisionAttachment()}
             {renderDirectDocumentAttachments()}
             <div className="flex items-center gap-2">

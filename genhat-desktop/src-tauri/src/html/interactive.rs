@@ -25,7 +25,7 @@ pub fn render_interactive_plan(mut plan: HtmlPlan) -> String {
     plan.sections = normalize_sections("interactive", plan.sections, &plan.title);
 
     let layout = layout_for("interactive");
-    let theme = plan.theme.as_deref().unwrap_or("midnight");
+    let theme = plan.theme.as_deref().unwrap_or("minimal");
     let title = escape_html(&plan.title);
 
     let hero = plan

@@ -43,8 +43,11 @@ const COLOR_TOKEN_RE =
   /#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b|rgba?\(\s*[^)]+\)|hsla?\(\s*[^)]+\)|\b(?:white|black|red|green|blue|navy|teal|orange|gold|gray|grey|silver|transparent)\b/gi;
 
 /**
- * Named colors like `gold` / `coral` / `green` must not match inside
- * `--gold`, `--coral`, `--green` (would turn `var(--gold)` into `var(--#…)`).
+ * Named colors like `gold` / `green` must not match inside:
+ * - custom props (`--green`, `var(--gold)`)
+ * - selectors (`.green`, `#teal`)
+ * - hyphenated idents (`white-space`, `lightgreen` as property fragment)
+ * Only rewrite named colors in CSS *value* context (after `:`).
  */
 function isNamedColorInsideCustomPropIdent(
   css: string,
@@ -58,6 +61,40 @@ function isNamedColorInsideCustomPropIdent(
   let i = matchStart;
   while (i > 0 && /[A-Za-z0-9_-]/.test(css[i - 1]!)) i--;
   return css.slice(i, i + 2) === "--";
+}
+
+function isUnsafeNamedColorSite(
+  css: string,
+  matchStart: number,
+  matchRaw: string
+): boolean {
+  const t = matchRaw.trim().toLowerCase();
+  if (t.startsWith("#") || t.startsWith("rgb") || t.startsWith("hsl")) {
+    return false;
+  }
+  if (isNamedColorInsideCustomPropIdent(css, matchStart, matchRaw)) {
+    return true;
+  }
+  const before = matchStart > 0 ? css[matchStart - 1]! : "";
+  const after = css[matchStart + matchRaw.length] ?? "";
+  // Selector / ident fragments: .green, #…, white-space, outlined-green-btn
+  if (before === "." || before === "#" || before === "-" || after === "-") {
+    return true;
+  }
+  if (/[A-Za-z0-9_]/.test(before) || /[A-Za-z0-9_]/.test(after)) {
+    return true;
+  }
+  // Value context only: walk back to a `:` before hitting ; { }
+  for (let i = matchStart - 1; i >= 0; i--) {
+    const c = css[i]!;
+    if (c === ":") {
+      // Skip ::pseudo-element colons
+      if (i > 0 && css[i - 1] === ":") continue;
+      return false;
+    }
+    if (c === ";" || c === "{" || c === "}") return true;
+  }
+  return true;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -453,7 +490,7 @@ function recolorColorToken(
 /** First pass: recolor every color token with property usage context. */
 function recolorCssColors(css: string, ctx: RecolorContext): string {
   return css.replace(COLOR_TOKEN_RE, (raw, offset: number) => {
-    if (isNamedColorInsideCustomPropIdent(css, offset, raw)) return raw;
+    if (isUnsafeNamedColorSite(css, offset, raw)) return raw;
     const prop = propertyAt(css, offset);
     const custom = customPropAt(css, offset);
     const usage = usageFromProperty(prop, custom);
@@ -465,7 +502,7 @@ function firstColorTokenIn(value: string): string | null {
   const re = new RegExp(COLOR_TOKEN_RE.source, "gi");
   let m: RegExpExecArray | null;
   while ((m = re.exec(value))) {
-    if (isNamedColorInsideCustomPropIdent(value, m.index, m[0])) continue;
+    if (isUnsafeNamedColorSite(value, m.index, m[0])) continue;
     return m[0];
   }
   return null;
@@ -481,7 +518,7 @@ function replaceColorTokensIn(
   replace: (raw: string) => string
 ): string {
   return value.replace(COLOR_TOKEN_RE, (raw, offset: number) => {
-    if (isNamedColorInsideCustomPropIdent(value, offset, raw)) return raw;
+    if (isUnsafeNamedColorSite(value, offset, raw)) return raw;
     return replace(raw);
   });
 }

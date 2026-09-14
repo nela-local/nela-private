@@ -7,7 +7,6 @@ import {
   isEditableArtifactPath,
   type ArtifactEditKind,
 } from "../artifactEdit";
-import { extractAmbientSearchQuery } from "../ambientSearch";
 import type { SendHandlerContext } from "./types";
 
 export type ArtifactEditOptions = {
@@ -39,17 +38,8 @@ export async function handleArtifactEdit(
       options.attachedPaths.find(isEditableArtifactPath) ?? options.attachedPaths[0];
   }
 
-  if (!artifactPath) {
-    const searchQuery = extractAmbientSearchQuery(text);
-    try {
-      const md = await Api.queryKnowledgeBase(searchQuery);
-      const matches = [...md.matchAll(/\(File:\s*([^)]+)\)/g)].map((m) => m[1].trim());
-      const match = matches.find((p) => isEditableArtifactPath(p));
-      if (match) artifactPath = match;
-    } catch (err) {
-      console.warn("Doc-graph search for artifact edit failed:", err);
-    }
-  }
+  // Do not host-call Doc Graph to guess an edit target — only the LLM may
+  // call search_knowledge_base. Require an open/attached artifact path.
 
   if (!artifactPath) {
     ctx.updateSession(sid, (prev) => ({

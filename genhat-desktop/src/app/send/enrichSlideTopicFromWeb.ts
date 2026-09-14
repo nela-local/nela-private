@@ -361,7 +361,25 @@ export async function enrichSlideTopicFromWeb(
   options?: { searchQuery?: string | null; searchDepth?: WebToolDepth }
 ): Promise<EnrichedSlideContent> {
   const title = topic.trim();
-  const queries = researchQueries(title, deck, options?.searchQuery);
+  // Host must not invent web_search calls. Only run when the LLM planner
+  // supplied an explicit query (model-initiated tool use).
+  const llmQuery = options?.searchQuery?.trim();
+  if (!llmQuery) {
+    return {
+      title,
+      summary: "",
+      bullets: [],
+      paragraphs: title
+        ? [`${title} — expand with details from the conversation or a web_search tool call.`]
+        : [],
+      imageOnLeft: deck?.imageOnLeft,
+      bodyStyle: deck?.bodyStyle,
+      layoutTheme: deck?.layoutTheme,
+      kicker: deck?.kickerPrefix,
+    };
+  }
+
+  const queries = researchQueries(title, deck, llmQuery);
   const depth = options?.searchDepth ?? "full";
 
   onStatus?.(`Searching the web for “${queries[0] || title}”…`);

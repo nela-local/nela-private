@@ -14,8 +14,8 @@ const THEME_KEYWORDS: Record<HtmlRendererTheme, { aliases: string[]; topics: str
     topics: ["study", "hypothesis", "methodology", "paper", "history", "education", "lecture"],
   },
   cyber: {
-    aliases: ["cyber", "tech", "hacker", "matrix", "futuristic", "sci-fi"],
-    topics: ["ai", "machine learning", "software", "cybersecurity", "blockchain", "cloud", "data science"],
+    aliases: ["cyber", "hacker", "matrix", "futuristic", "sci-fi", "dark mode", "dark theme"],
+    topics: [],
   },
   ocean: {
     aliases: ["ocean", "aqua", "marine", "blue", "sea", "water"],
@@ -46,12 +46,27 @@ const THEME_KEYWORDS: Record<HtmlRendererTheme, { aliases: string[]; topics: str
     topics: ["engineering", "architecture", "manufacturing", "logistics", "operations", "report"],
   },
   minimal: {
-    aliases: ["minimal", "minimalist", "clean", "simple", "light theme", "white background"],
-    topics: ["overview", "summary", "tutorial", "guide", "documentation", "docs"],
+    aliases: ["minimal", "minimalist", "clean", "simple", "light theme", "white background", "modern", "sleek", "default"],
+    topics: [
+      "overview",
+      "summary",
+      "tutorial",
+      "guide",
+      "documentation",
+      "docs",
+      "product",
+      "roadmap",
+      "vision",
+      "innovation",
+      "ai",
+      "software",
+      "tech",
+      "saas",
+    ],
   },
   midnight: {
-    aliases: ["midnight", "dark", "sleek", "modern"],
-    topics: ["product", "roadmap", "vision", "innovation", "saas"],
+    aliases: ["midnight", "dark"],
+    topics: [],
   },
   aurora: {
     aliases: ["aurora", "northern lights", "gradient", "teal purple"],
@@ -62,6 +77,13 @@ const THEME_KEYWORDS: Record<HtmlRendererTheme, { aliases: string[]; topics: str
     topics: ["report", "briefing", "memo", "newsletter", "article"],
   },
 };
+
+const LIGHT_FALLBACK_THEMES: HtmlRendererTheme[] = [
+  "minimal",
+  "paper",
+  "corporate",
+  "academic",
+];
 
 function hashString(text: string): number {
   let hash = 5381;
@@ -94,6 +116,6 @@ export function inferHtmlTheme(text: string): HtmlRendererTheme {
   }
   if (best) return best;
 
-  const idx = hashString(lower.trim()) % HTML_RENDERER_THEMES.length;
-  return HTML_RENDERER_THEMES[idx];
+  const idx = hashString(lower.trim()) % LIGHT_FALLBACK_THEMES.length;
+  return LIGHT_FALLBACK_THEMES[idx];
 }

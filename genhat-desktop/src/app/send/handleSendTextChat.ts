@@ -47,7 +47,9 @@ import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore
 import { useTelegramStore } from "../../stores/telegramStore";
 import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromptStore";
 import { looksLikeDriveRequest } from "./driveConnectIntent";
+import { looksLikeTallyRequest } from "./tallyConnectIntent";
 import { useDriveStore } from "../../stores/driveStore";
+import { useTallyStore } from "../../stores/tallyStore";
 import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
 import { useChatModeStore } from "../../stores/chatModeStore";
 import { useArtifactStreamStore } from "../../stores/artifactStreamStore";
@@ -118,6 +120,20 @@ export async function handleSendTextChat(
       })
       .catch(() => {
         useDriveConnectPromptStore.getState().show();
+      });
+  }
+
+  if (looksLikeTallyRequest(text)) {
+    void useTallyStore
+      .getState()
+      .refresh()
+      .then(() => {
+        if (!useTallyStore.getState().connected) {
+          useTallyStore.getState().openWizard();
+        }
+      })
+      .catch(() => {
+        useTallyStore.getState().openWizard();
       });
   }
 
@@ -356,7 +372,7 @@ export async function handleSendTextChat(
       applyAutoArtifactEmit(streamParser.finalize());
       artifactUiFlusher.flushNow();
     }
-    useChatModeStore.getState().setLiveToolStatus(null);
+    useChatModeStore.getState().clearLiveToolSteps();
     if (ctx.generalIntervalRef.current) clearInterval(ctx.generalIntervalRef.current);
     const totalTime = Math.floor((Date.now() - chatStartTime) / 100) / 10;
     const timeToFirstToken =
@@ -584,7 +600,7 @@ export async function handleSendTextChat(
   const finishErr = (err: unknown) => {
     chunkFlusher.flushNow();
     thinkingFlusher.flushNow();
-    useChatModeStore.getState().setLiveToolStatus(null);
+    useChatModeStore.getState().clearLiveToolSteps();
     if (ctx.generalIntervalRef.current) clearInterval(ctx.generalIntervalRef.current);
     ctx.setGeneralGenerating(false);
     ctx.setStreamingThinking("");
@@ -628,8 +644,9 @@ export async function handleSendTextChat(
   const emailIntent = looksLikeEmailRequest(text);
   const telegramIntent = looksLikeTelegramRequest(text);
   const driveIntent = looksLikeDriveRequest(text);
+  const tallyIntent = looksLikeTallyRequest(text);
   let connectorToolsNeeded = false;
-  if (emailIntent || telegramIntent || driveIntent) {
+  if (emailIntent || telegramIntent || driveIntent || tallyIntent) {
     try {
       if (emailIntent && (await Api.gmailStatus()).connected) {
         connectorToolsNeeded = true;
@@ -651,6 +668,13 @@ export async function handleSendTextChat(
     } catch {
       /* ignore */
     }
+    try {
+      if (tallyIntent && (await Api.tallyStatus()).connected) {
+        connectorToolsNeeded = true;
+      }
+    } catch {
+      /* ignore */
+    }
   }
   const useToolLoop =
     effectiveWebEnabled ||
@@ -658,18 +682,22 @@ export async function handleSendTextChat(
     autoArtifacts ||
     connectorToolsNeeded;
   if (useToolLoop) {
+    useChatModeStore.getState().clearLiveToolSteps();
     if (fileSearchEnabled && !effectiveWebEnabled && !connectorToolsNeeded) {
-      useChatModeStore.getState().setLiveToolStatus("Ready to search your files…");
+      useChatModeStore.getState().pushLiveToolStep("Ready to search your files…");
     }
     if (connectorToolsNeeded && emailIntent) {
-      useChatModeStore.getState().setLiveToolStatus("Using Gmail…");
+      useChatModeStore.getState().pushLiveToolStep("Using Gmail…");
+    }
+    if (connectorToolsNeeded && tallyIntent) {
+      useChatModeStore.getState().pushLiveToolStep("Using Tally…");
     }
     runCloudAwareToolLoop({
       messages: sendMessages,
       webDepth: "full",
       webEnabled: effectiveWebEnabled,
       fileSearchEnabled,
-      includeMcpTools: !autoArtifacts,
+      includeMcpTools: !autoArtifacts || Boolean(tallyIntent && connectorToolsNeeded),
       chartEnabled: true,
       chartPool,
       containsFileContext: explicitAttachments,
@@ -683,7 +711,18 @@ export async function handleSendTextChat(
       onChunk,
       onThinking,
       onToolStatus: (status) => {
-        useChatModeStore.getState().setLiveToolStatus(status);
+        const store = useChatModeStore.getState();
+        if (status) {
+          const last = store.liveToolSteps[store.liveToolSteps.length - 1];
+          const isNew = !last?.active || last.label !== status;
+          store.pushLiveToolStep(status);
+          // Interleave host activity into reasoning (Cursor-style think → act → think).
+          if (isNew) {
+            onThinking(`\n\n▸ ${status}\n`);
+          }
+        } else {
+          store.completeLiveToolSteps();
+        }
       },
       onArtifact: (artifact) => {
         ctx.updateSession(sid, () => ({

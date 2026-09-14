@@ -118,13 +118,11 @@ export async function runDeterministicSlideExpand(
       updateEditMsg(
         "CrunchingMetrics",
         null,
-        `Expanding **${title}** with more web-backed detail…`
+        `Expanding **${title}**…`
       );
-      const enriched = await enrichSlideTopicFromWeb(
-        title,
-        (msg) => updateEditMsg("CrunchingMetrics", null, msg),
-        deck
-      );
+      // Deterministic expand must not host-call web_search. Prefer existing
+      // on-slide text; enrichSlideTopicFromWeb without an LLM query is a no-op stub.
+      const enriched = await enrichSlideTopicFromWeb(title, undefined, deck);
 
       const bullets = mergeUnique(existingBullets, enriched.bullets ?? [], 6);
       const paragraphs = mergeUnique(
@@ -233,13 +231,9 @@ export async function runDeterministicSlideExpand(
   updateEditMsg(
     "CrunchingMetrics",
     null,
-    `Expanding **${title}** with more web-backed detail…`
+    `Expanding **${title}**…`
   );
-  const enriched = await enrichSlideTopicFromWeb(
-    title,
-    (msg) => updateEditMsg("CrunchingMetrics", null, msg),
-    deck
-  );
+  const enriched = await enrichSlideTopicFromWeb(title, undefined, deck);
   const bullets = mergeUnique(
     existing,
     [

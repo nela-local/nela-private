@@ -2,7 +2,7 @@
  * OpenAI-style host-mediated tool loop for local models.
  *
  * When web and/or file search are enabled the model may emit a JSON tool call;
- * the host runs Api.webSearch / Api.queryKnowledgeBase and continues until a
+ * the host runs Api.webSearch / Api.queryKnowledgeBase / Api.localShellRun and continues until a
  * final prose answer (up to 20 tool rounds).
  */
 
@@ -43,6 +43,9 @@ Reply with ONLY JSON (no markdown). One query:
 Several facets at once (preferred — they run in parallel):
 [{"tool":"search_knowledge_base","query":"facet A","top_k":25},{"tool":"search_knowledge_base","query":"facet B","top_k":25}]
 Prefer higher top_k (25–40) so graph/vector retrieval can surface related chunks; use 10–15 only for pinpoint lookups (max 50).
+You also have local_shell for deep-reading after search returns absolute paths. Allowed programs: ls, cat, head, tail, wc, grep, rg, find (no -exec/-delete).
+{"tool":"local_shell","argv":["head","-n","40","/absolute/path"]}
+Never bash/sh -c, pipes, or writes. Typical flow: search_knowledge_base → local_shell on a returned path when snippets are insufficient.
 After tool results, answer from those sources with inline [n] citations only (no raw file paths or Sources list).`;
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
@@ -65,10 +68,17 @@ export interface FileSearchToolCall {
   topK?: number;
 }
 
+export interface LocalShellToolCall {
+  tool: "local_shell";
+  argv: string[];
+  cwd?: string;
+}
+
 export type HostWebToolCall =
   | WebSearchToolCall
   | WebExtractToolCall
-  | FileSearchToolCall;
+  | FileSearchToolCall
+  | LocalShellToolCall;
 
 export interface WebSearchToolLoopOptions {
   messages: ChatContextMessage[];
@@ -149,6 +159,22 @@ function toolCallFromObject(obj: Record<string, unknown>): HostWebToolCall | nul
       query: query.slice(0, 200),
       topK,
     };
+  }
+
+  if (tool === "local_shell") {
+    const rawArgv = args.argv;
+    const argv = Array.isArray(rawArgv)
+      ? (rawArgv as unknown[])
+          .filter((a): a is string => typeof a === "string")
+          .map((a) => a.trim())
+          .filter(Boolean)
+      : [];
+    if (argv.length === 0) return null;
+    const cwd =
+      typeof args.cwd === "string" && args.cwd.trim()
+        ? args.cwd.trim()
+        : undefined;
+    return { tool: "local_shell", argv, cwd };
   }
 
   if (tool !== "web_search") return null;
@@ -417,7 +443,7 @@ export async function runWebSearchToolLoop(
         if (c.tool === "web_search" || c.tool === "web_extract") {
           return webEnabled;
         }
-        if (c.tool === "search_knowledge_base") {
+        if (c.tool === "search_knowledge_base" || c.tool === "local_shell") {
           return fileSearchEnabled;
         }
         return false;
@@ -454,7 +480,13 @@ export async function runWebSearchToolLoop(
         const fileCalls = calls.filter(
           (c): c is FileSearchToolCall => c.tool === "search_knowledge_base"
         );
-        const otherCalls = calls.filter((c) => c.tool !== "search_knowledge_base");
+        const shellCalls = calls.filter(
+          (c): c is LocalShellToolCall => c.tool === "local_shell"
+        );
+        const otherCalls = calls.filter(
+          (c) =>
+            c.tool !== "search_knowledge_base" && c.tool !== "local_shell"
+        );
 
         const toolBodies: string[] = [];
 
@@ -480,6 +512,29 @@ export async function runWebSearchToolLoop(
             webSearchResult = formatted.webSearchResult;
             toolBodies.push(formatted.toolBody);
           }
+        }
+
+        for (const call of shellCalls) {
+          const display = call.argv.join(" ");
+          opts.onToolStatus?.(`Running ${display.slice(0, 80)}`);
+          const result = await Api.localShellRun(call.argv, call.cwd ?? null);
+          opts.onToolStatus?.(null);
+          const parts: string[] = [
+            `Command: ${result.command}`,
+            result.ok
+              ? "Status: ok"
+              : `Status: failed (${result.error ?? "error"})`,
+          ];
+          if (result.exitCode != null) {
+            parts.push(`Exit code: ${result.exitCode}`);
+          }
+          if (result.stdout.trim()) parts.push(`stdout:\n${result.stdout}`);
+          if (result.stderr.trim()) parts.push(`stderr:\n${result.stderr}`);
+          if (result.truncated) parts.push("(output truncated)");
+          if (!result.stdout.trim() && !result.stderr.trim() && result.error) {
+            parts.push(result.error);
+          }
+          toolBodies.push(parts.join("\n\n"));
         }
 
         for (const call of otherCalls) {
@@ -558,7 +613,7 @@ export async function runWebSearchToolLoop(
                 ? "call web_search (with depth) / web_extract if more web facts are needed"
                 : null,
               fileSearchEnabled
-                ? "call search_knowledge_base once or as a parallel JSON array of queries (prefer higher top_k) if more local context is needed"
+                ? "call search_knowledge_base or local_shell (argv allowlist: ls/cat/grep/rg/head/tail/wc/find) if more local context is needed"
                 : null,
               "otherwise answer in prose with inline [n] citations only (no raw URLs/paths or Sources list)",
             ]

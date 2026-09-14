@@ -630,6 +630,17 @@ export default function ArtifactSidePanel({
     return () => window.removeEventListener("message", onMessage);
   }, [editBusy, savedPath, activeSlideIndex, type, editOpen]);
 
+  // Live Tally dashboard: iframe postMessage → Api.tally* → response
+  useEffect(() => {
+    let detach: (() => void) | undefined;
+    void import("../app/tallyLiveBridge").then(({ attachTallyLiveBridge }) => {
+      detach = attachTallyLiveBridge(
+        () => previewIframeRef.current?.contentWindow ?? null
+      );
+    });
+    return () => detach?.();
+  }, []);
+
   /** Preview srcDoc — gate library rail; inject click-to-select while Edit is open. */
   const iframeSrcDoc = useMemo(() => {
     if (!displayHtml) return "";

@@ -68,20 +68,20 @@ const THEME_CORPORATE: Theme = Theme {
     css_vars: r#":root {
   --font-head: 'Inter', system-ui, sans-serif;
   --font-body: 'Source Sans 3', system-ui, sans-serif;
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --text: #f1f5f9;
-  --text-muted: #94a3b8;
-  --text-secondary: #cbd5e1;
-  --accent-from: #60a5fa;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-secondary: #334155;
+  --accent-from: #3b82f6;
   --accent-to: #2563eb;
   --accent-solid: #2563eb;
-  --accent-glow: rgba(37, 99, 235, 0.6);
-  --border-subtle: rgba(255, 255, 255, 0.12);
-  --footer-bg: rgba(15, 23, 42, 0.85);
+  --accent-glow: rgba(37, 99, 235, 0.25);
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --footer-bg: rgba(248, 250, 252, 0.92);
   --bullet-radius: 2px;
-  --mock-image-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(30, 41, 59, 0.5) 100%);
-  --section-line: rgba(37, 99, 235, 0.5);
+  --mock-image-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(148, 163, 184, 0.12) 100%);
+  --section-line: rgba(37, 99, 235, 0.35);
 }"#,
 };
 
@@ -98,20 +98,20 @@ const THEME_SUNSET: Theme = Theme {
     css_vars: r#":root {
   --font-head: 'Poppins', system-ui, sans-serif;
   --font-body: 'Nunito', system-ui, sans-serif;
-  --bg: #1a0f14;
-  --surface: #2d1520;
-  --text: #fce7f3;
-  --text-muted: #f9a8d4;
-  --text-secondary: #fbcfe8;
+  --bg: #fff7ed;
+  --surface: #ffffff;
+  --text: #431407;
+  --text-muted: #9a3412;
+  --text-secondary: #7c2d12;
   --accent-from: #fb923c;
-  --accent-to: #f43f5e;
-  --accent-solid: #f43f5e;
-  --accent-glow: rgba(244, 63, 94, 0.7);
-  --border-subtle: rgba(255, 255, 255, 0.1);
-  --footer-bg: rgba(26, 15, 20, 0.75);
+  --accent-to: #ea580c;
+  --accent-solid: #ea580c;
+  --accent-glow: rgba(234, 88, 12, 0.25);
+  --border-subtle: rgba(67, 20, 7, 0.08);
+  --footer-bg: rgba(255, 247, 237, 0.92);
   --bullet-radius: 50%;
-  --mock-image-bg: linear-gradient(135deg, rgba(251, 146, 60, 0.15) 0%, rgba(244, 63, 94, 0.1) 100%);
-  --section-line: rgba(251, 146, 60, 0.5);
+  --mock-image-bg: linear-gradient(135deg, rgba(251, 146, 60, 0.12) 0%, rgba(244, 63, 94, 0.08) 100%);
+  --section-line: rgba(234, 88, 12, 0.35);
 }"#,
 };
 
@@ -410,16 +410,16 @@ fn theme_by_name(name: &str) -> Option<&'static Theme> {
     match lower.as_str() {
         "corporate" | "business" | "professional" => Some(&THEME_CORPORATE),
         "sunset" | "warm" | "vibrant" => Some(&THEME_SUNSET),
-        "minimal" | "clean" | "simple" | "light" => Some(&THEME_MINIMAL),
+        "minimal" | "clean" | "simple" | "light" | "default" | "modern" => Some(&THEME_MINIMAL),
         "academic" | "research" | "serif" => Some(&THEME_ACADEMIC),
-        "cyber" | "tech" | "hacker" | "matrix" => Some(&THEME_CYBER),
+        "cyber" | "hacker" | "matrix" => Some(&THEME_CYBER),
         "ocean" | "blue" | "aqua" | "marine" => Some(&THEME_OCEAN),
         "forest" | "green" | "nature" | "eco" => Some(&THEME_FOREST),
         "lavender" | "purple" | "violet" => Some(&THEME_LAVENDER),
         "neon" | "bright" | "electric" => Some(&THEME_NEON),
         "rose" | "pink" | "elegant" => Some(&THEME_ROSE),
         "slate" | "gray" | "grey" | "mono" => Some(&THEME_SLATE),
-        "midnight" | "dark" | "default" => Some(&THEME_MIDNIGHT),
+        "midnight" | "dark" => Some(&THEME_MIDNIGHT),
         _ => ALL_THEMES.iter().find(|t| t.name == lower).copied(),
     }
 }
@@ -430,7 +430,9 @@ fn resolve_theme(name: Option<&str>, seed: u64) -> &'static Theme {
             return theme;
         }
     }
-    ALL_THEMES[(seed as usize) % ALL_THEMES.len()]
+    // Default to light themes for non-tech audiences when none was specified.
+    const LIGHT: &[&Theme] = &[&THEME_MINIMAL, &THEME_ACADEMIC, &THEME_CORPORATE];
+    LIGHT[(seed as usize) % LIGHT.len()]
 }
 
 /// Content layouts rotated so consecutive slides never repeat the same structure.

@@ -9,7 +9,7 @@
 #   disabled     — hidden from the UI
 #
 # capabilities (informational + future gating):
-#   browse | sync | fetch | create | update | send
+#   browse | sync | fetch | create | update | send | read
 #
 # auth_kind: oauth2 | api_key | mtproto | none
 # connect_flow:
@@ -114,9 +114,9 @@ show_in_attach_menu = true
 id = "tally"
 display_name = "Tally"
 category = "accounting"
-status = "coming_soon"
+status = "available"
 auth_kind = "api_key"
-connect_flow = "none"
-capabilities = ["browse", "fetch"]
-description = "Connect Tally for accounting documents and reports."
-show_in_attach_menu = true
+connect_flow = "tally_localhost"
+capabilities = ["read"]
+description = "Read-only TallyPrime via local XML HTTP (reports, ledgers, dashboards)."
+show_in_attach_menu = false

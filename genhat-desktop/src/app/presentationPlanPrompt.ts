@@ -3,6 +3,7 @@
  */
 
 import { NELA_NUMERICAL_ACCURACY_RULES } from "./nelaSystemPrompt";
+import { NELA_ARTIFACT_AUDIENCE_VISUAL_RULES } from "./artifactAudiencePrompt";
 
 /** Local / constrained schema (used with GBNF on device). */
 export const PRESENTATION_SCHEMA_STATIC = `You generate ONLY a JSON presentation plan. No markdown, no code fences, no commentary.
@@ -11,24 +12,26 @@ Schema:
 {"slides":[{"title":"string","layout":"TITLE"|"SECTION"|"BULLET"|"TWO_COLUMN"|"IMAGE_LEFT"|"STAT"|"QUOTE"|"CARDS"|"COMPARISON"|"CENTERED","bullets":["string"],"notes":"string","left_title":"string","right_title":"string"}],"theme":"midnight"|"corporate"|"sunset"|"minimal"|"academic"|"cyber"|"ocean"|"forest"|"lavender"|"neon"|"rose"|"slate"}
 
 Layouts (pick to fit content):
-- TITLE: cover. bullets = subtitle + 1–2 concrete taglines.
-- SECTION: section divider with 1–3 real intro lines.
+- TITLE: cover. bullets = subtitle + 1–2 concrete taglines (full sentences).
+- SECTION: section divider with 1–3 real intro lines that teach the next chapter.
 - BULLET: 4–6 bullets, each 15–40 words with a claim + brief explanation or example.
-- TWO_COLUMN / IMAGE_LEFT: 4–6 concrete points.
+- TWO_COLUMN / IMAGE_LEFT: 4–6 concrete points with enough detail to stand alone.
 - STAT: bullets[0] = headline metric/fact; then 2–3 supporting specifics. Prefer STAT when the topic has numbers.
-- QUOTE: takeaway + attribution/context.
+- QUOTE: takeaway + attribution/context in plain language.
 - CARDS: 3–4 items as "Label: 1–2 sentence specifics".
 - COMPARISON: 3–5 points per side; left_title/right_title must be real domain terms (e.g. Classical vs Quantum), never "Primary approach".
-- CENTERED: 2–4 short paragraphs of real takeaways.
+- CENTERED: 2–4 short paragraphs of real takeaways (not a single vague line).
 - IMAGE_LEFT: set image_index from the AVAILABLE IMAGES catalog when present.
 
 Content rules:
 - First slide TITLE; last slide CENTERED with a concrete takeaway about THIS topic.
-- Slide 1–2 must DEFINE the topic (what it is / how it works). Later slides need named examples (algorithms, products, people, events, case studies — whatever fits).
+- Slide 1–2 must DEFINE the topic (what it is / how it works) for a non-expert. Later slides need named examples (products, people, events, case studies — whatever fits).
 - When statistics exist, include at least one STAT slide with real figures.
 - Every bullet must be specifically about the user's topic. No vague fluff ("transformative potential", "continuous innovation") unless tied to a fact.
 - Use ≥4 different layouts. Avoid Q&A / References / Final Thoughts unless asked.
-- Theme must match the topic.
+- Theme: default to a LIGHT theme (minimal, academic, or corporate). Use midnight/cyber/neon only if the user explicitly asks for dark mode.
+
+${NELA_ARTIFACT_AUDIENCE_VISUAL_RULES}
 
 ${NELA_NUMERICAL_ACCURACY_RULES}`;
 
@@ -43,11 +46,13 @@ Schema:
 
 Content rules:
 - Answer the USER'S REQUEST exactly. Never pivot to worksheets, crafts, card projects, or unrelated products.
-- Pack each slide with concrete facts (names, dates, places, figures). Bullets should be 15–40 words when possible — not one-word stubs.
-- First slide TITLE; later slides use varied layouts. Prefer 6–10 slides unless the user asked for a count.
+- Pack each slide with concrete facts (names, dates, places, figures) and plain-language explanation. Bullets should be 15–40 words — not one-word stubs.
+- First slide TITLE; later slides use varied layouts. Prefer 8–12 slides unless the user asked for a count.
 - When statistics exist, include at least one STAT slide. When AVAILABLE IMAGES exist, use IMAGE_LEFT with image_index.
-- Theme should fit the tone (somber history → midnight/rose; business → corporate).
+- Theme: prefer LIGHT (minimal, academic, corporate). Use dark themes only if the user explicitly asks.
 - Set output_name to a short filename-friendly title.
+
+${NELA_ARTIFACT_AUDIENCE_VISUAL_RULES}
 
 ${NELA_NUMERICAL_ACCURACY_RULES}`;
 
@@ -67,18 +72,20 @@ OUTPUT FORMAT (mandatory):
 CRITICAL CONTENT RULES:
 - Do NOT return JSON (no {"slides":...}). HTML only inside the artifact tag.
 - WRITE ORDER (mandatory to avoid blank decks): put the full <body> with ALL slide markup and text FIRST, then a compact <style>, then <script>. Never write a long stylesheet before slide content.
-- Keep CSS under ~80 lines. Prefer simple layouts over elaborate gradients.
+- Keep CSS under ~80 lines. Prefer simple light layouts over elaborate dark gradients.
 - Build a multi-slide deck with arrow-key / button navigation and a slide counter.
 - Mark each slide with class="slide". First slide must include class="slide active" so something is visible immediately.
-- Converter-friendly layout: each .slide is a 16:9 page (1280×720 or 1920×1080), box-sizing:border-box. Do not put a long scrolling document inside one slide. Size charts/SVG/canvas with explicit pixel width and height. Prefer solid fills or linear-gradient (radial gradients and CSS filters become images on export).
-- Complete creative freedom on colors/fonts — but content first, polish second.
-- Content must be RICH and specific. Prefer 6–10 slides unless the user asked for a count.
+- Converter-friendly layout: each .slide is a 16:9 page (1280×720 or 1920×1080), box-sizing:border-box. Do not put a long scrolling document inside one slide. Size charts/SVG/canvas with explicit pixel width and height. Prefer solid light fills or soft linear-gradient (avoid black full-bleed backgrounds).
+- Content must be RICH, specific, and easy for a non-expert to follow. Prefer 8–12 slides unless the user asked for a count.
+- Body text on slides should be substantial: 4–6 detailed bullets or 2–3 short paragraphs per content slide — not sparse titles with empty space.
 - When the topic has statistics, include STAT slides (headline metric + supporting bullets).
 - Do NOT write Chart.js, Plotly, or hand-rolled echarts.init. When AVAILABLE CHARTS are listed, embed with <div data-nela-chart="nela-chart:0"></div> on relevant slides.
 - When AVAILABLE IMAGES are listed, embed with <img src="nela-img:0"> on relevant slides (hero / IMAGE_LEFT style layouts). Never invent image URLs.
 - Stay on the USER'S TOPIC. Ignore off-topic web results (worksheets, crafts, product listings).
 - Set <title> to a short accurate deck title.
 - No markdown fences around the HTML.
+
+${NELA_ARTIFACT_AUDIENCE_VISUAL_RULES}
 
 ${NELA_NUMERICAL_ACCURACY_RULES}`;
 

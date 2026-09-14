@@ -21,6 +21,7 @@ import {
   type LocalIntelligenceTier,
 } from "../app/intelligenceModes";
 import ConnectionsSettings from "./ConnectionsSettings";
+import { useAppUpdateStore } from "../stores/appUpdateStore";
 import "./ModelsSettingsModal.css";
 
 interface ModelsSettingsModalProps {
@@ -339,6 +340,12 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
   const { theme, setTheme } = useTheme();
   const setHfModalOpen = useUIStore((s) => s.setHfModalOpen);
   const setHfModalPreset = useUIStore((s) => s.setHfModalPreset);
+  const updateChecking = useAppUpdateStore((s) => s.checking);
+  const updateError = useAppUpdateStore((s) => s.error);
+  const upToDateMessage = useAppUpdateStore((s) => s.upToDateMessage);
+  const runManualCheck = useAppUpdateStore((s) => s.runManualCheck);
+  const clearUpToDate = useAppUpdateStore((s) => s.clearUpToDate);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const contextUsageBySession = useSessionStore((s) => s.contextUsageBySession);
@@ -370,8 +377,13 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setIntelligenceMapping(readIntelligenceMapping());
+      clearUpToDate();
+      void import("@tauri-apps/api/app")
+        .then(({ getVersion }) => getVersion())
+        .then((v) => setAppVersion(v))
+        .catch(() => setAppVersion(null));
     }
-  }, [isOpen]);
+  }, [isOpen, clearUpToDate]);
 
   const chatModelOptions = useMemo(() => {
     const source = modelCatalog.length > 0 ? modelCatalog : models;
@@ -646,6 +658,25 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
         <div className="settings-modal-body">
           <div className="px-4 py-3 border-b border-glass-border space-y-3">
             <div className="flex items-center justify-between gap-3 py-1">
+              <div>
+                <div className="text-[0.85rem] font-semibold text-txt">NELA desktop</div>
+                <div className="text-[0.78rem] text-txt-muted">
+                  Version {appVersion ?? "…"}
+                  {upToDateMessage ? ` · ${upToDateMessage}` : ""}
+                  {updateError ? ` · Update check failed: ${updateError}` : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={updateChecking}
+                onClick={() => void runManualCheck()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-glass-border text-[0.78rem] text-txt-muted hover:text-txt hover:border-neon/50 disabled:opacity-50 transition"
+              >
+                {updateChecking ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                Check for updates
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 py-1 border-t border-glass-border pt-3">
               <div>
                 <div className="text-[0.85rem] font-semibold text-txt">Advanced mode</div>
                 <div className="text-[0.78rem] text-txt-muted">

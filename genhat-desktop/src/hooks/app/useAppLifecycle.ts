@@ -744,6 +744,17 @@ export function useAppLifecycle() {
     }
   }, [preferredMode, selectedModel, intelligenceMapping, useSpecificModelPicker, intelligenceMode]);
 
+  // Soft app-update check (notification + download). Delayed so it doesn't
+  // compete with the startup model toast.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void import("../../stores/appUpdateStore").then(({ useAppUpdateStore }) => {
+        void useAppUpdateStore.getState().runStartupCheck();
+      });
+    }, 8_000);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // Clean up TTS and general timers on unmount
   useEffect(() => {
     return () => {

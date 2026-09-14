@@ -13,7 +13,6 @@ import {
   isHtmlSlideDeck,
 } from "./freeformHtmlSlideEdit";
 import {
-  enrichSlideTopicFromWeb,
   slideNeedsWebEnrichment,
 } from "./enrichSlideTopicFromWeb";
 import { buildDeckSlideContext } from "./deckSlideContext";
@@ -21,8 +20,9 @@ import type { SendHandlerContext } from "./types";
 import { friendlyErrorFromUnknown } from "../friendlyError";
 
 /**
- * Deterministic slide insert — no LLM for layout. Topic slides ("about X")
- * are enriched via web search before insert.
+ * Deterministic slide insert — no LLM for layout, no host-side web_search.
+ * Topic copy comes from the parsed prompt; the edit planner may research via
+ * LLM tool calls before reaching this fallback.
  */
 export async function runDeterministicSlideAdd(
   text: string,
@@ -67,26 +67,18 @@ export async function runDeterministicSlideAdd(
         layout: slideSpec.layout,
       };
     }
-    updateEditMsg(
-      "CrunchingMetrics",
-      null,
-      `Researching **${slideSpec.title}** for this deck…`
-    );
-    const enriched = await enrichSlideTopicFromWeb(
-      slideSpec.title,
-      (msg) => updateEditMsg("CrunchingMetrics", null, msg),
-      deck
-    );
+    // No host-side web_search — the edit planner may call web_search via the
+    // LLM; deterministic fallback uses the parsed title/bullets only.
     return {
-      title: enriched.title,
-      bullets: enriched.bullets,
-      paragraphs: enriched.paragraphs,
-      summary: enriched.summary,
-      imageDataUri: enriched.imageDataUri,
-      imageOnLeft: enriched.imageOnLeft,
-      bodyStyle: enriched.bodyStyle,
-      layoutTheme: enriched.layoutTheme,
-      kicker: enriched.kicker,
+      title: slideSpec.title,
+      bullets: slideSpec.bullets,
+      paragraphs: undefined as string[] | undefined,
+      summary: undefined as string | undefined,
+      imageDataUri: undefined as string | undefined,
+      imageOnLeft: deck.imageOnLeft,
+      bodyStyle: deck.bodyStyle,
+      layoutTheme: deck.layoutTheme,
+      kicker: deck.kickerPrefix,
       layout: slideSpec.layout,
     };
   };

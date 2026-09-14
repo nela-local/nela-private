@@ -1,5 +1,5 @@
 import type { FileRecord } from "../types";
-import { extractLocalFilePath, hasLocalFilePathReference } from "./ambientFileContent";
+import { extractLocalFilePath } from "./ambientFileContent";
 
 /** Minimum relevance score to inject a file into chat context. */
 export const AMBIENT_MIN_SCORE = 0.55;
@@ -45,21 +45,16 @@ export function hasDocumentFileIntent(text: string): boolean {
 }
 
 /**
- * Decide whether to run ambient file search for this message.
- * Tighter than before: requires explicit file intent, not generic imperatives.
+ * Host-side Doc Graph search is never keyword-triggered.
+ * Only an explicit user control (`/files` or the Search-my-files force flag)
+ * may run search outside an LLM tool call. Phrase heuristics stay exported for
+ * query shaping / UI hints — they must not invoke tools.
  */
 export function shouldRunAmbientFileSearch(
-  text: string,
+  _text: string,
   options?: { forceFileSearch?: boolean }
 ): boolean {
-  if (options?.forceFileSearch) {
-    return true;
-  }
-  return (
-    hasSearchKeywords(text) ||
-    hasDocumentFileIntent(text) ||
-    hasLocalFilePathReference(text)
-  );
+  return Boolean(options?.forceFileSearch);
 }
 
 /** Whether the user used explicit file-search phrasing (miss → "file not found"). */

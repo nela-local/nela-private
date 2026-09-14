@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { HardDrive, Loader2, Mail, MessageCircle, Plug } from "lucide-react";
+import { HardDrive, Loader2, Mail, MessageCircle, Plug, Calculator } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 import { useConnectorStore } from "../stores/connectorStore";
 
 function iconFor(id: string, category?: string) {
   if (id === "gmail") return Mail;
   if (id === "telegram") return MessageCircle;
+  if (id === "tally") return Calculator;
   if (category === "storage" || id === "gdrive") return HardDrive;
   return Plug;
 }
@@ -40,7 +41,8 @@ export default function ConnectionsSettings() {
           <code className="text-[0.72rem]">connectors.toml</code>). Storage
           connectors can sync into Search my files; Gmail and Telegram can send
           and read messages you approve; Google Drive can search files, share
-          open links, and summarize Docs/Sheets you approve in chat.
+          open links, and summarize Docs/Sheets you approve in chat; Tally can
+          export read-only ledgers and reports for dashboards you approve.
         </div>
         {profile?.authProvider === "google" && !gmailConnected ? (
           <div className="text-[0.78rem] text-txt-muted mt-1">
@@ -60,9 +62,9 @@ export default function ConnectionsSettings() {
         const Icon = iconFor(p.id, p.category);
         const conn = connections.find((c) => c.providerId === p.id);
         const connected = Boolean(conn);
-        const isStorage = (p.capabilities ?? []).some((c) =>
-          ["browse", "sync"].includes(c)
-        );
+        const isStorage =
+          p.id !== "tally" &&
+          (p.capabilities ?? []).some((c) => ["browse", "sync"].includes(c));
         const accountLabel = conn?.accountEmail
           ? `Connected as ${conn.accountEmail}`
           : conn?.remoteFolderName
@@ -152,7 +154,9 @@ export default function ConnectionsSettings() {
                 {thisConnecting
                   ? p.id === "telegram"
                     ? "Connecting…"
-                    : "Opening Google…"
+                    : p.id === "tally"
+                      ? "Opening…"
+                      : "Opening Google…"
                   : `Connect ${p.displayName}`}
               </button>
             )}

@@ -31,8 +31,8 @@ const THEME_KEYWORDS: Record<PresentationTheme, { aliases: string[]; topics: str
     topics: ["study", "literature", "hypothesis", "methodology", "paper", "history", "philosophy", "education", "lecture", "curriculum", "experiment", "citation"],
   },
   cyber: {
-    aliases: ["cyber", "tech", "hacker", "matrix", "futuristic", "sci-fi", "scifi"],
-    topics: ["ai", "machine learning", "artificial intelligence", "software", "programming", "cybersecurity", "security", "blockchain", "crypto", "cloud", "devops", "data science", "neural", "algorithm", "robotics", "quantum"],
+    aliases: ["cyber", "hacker", "matrix", "futuristic", "sci-fi", "scifi", "dark mode", "dark theme"],
+    topics: [],
   },
   ocean: {
     aliases: [
@@ -76,14 +76,38 @@ const THEME_KEYWORDS: Record<PresentationTheme, { aliases: string[]; topics: str
     topics: ["engineering", "architecture", "manufacturing", "logistics", "infrastructure", "hardware", "construction", "operations", "supply chain", "report"],
   },
   minimal: {
-    aliases: ["minimal", "minimalist", "clean", "simple", "light theme", "white background", "plain"],
-    topics: ["overview", "summary", "introduction", "getting started", "basics", "tutorial", "guide", "checklist"],
+    aliases: ["minimal", "minimalist", "clean", "simple", "light theme", "white background", "plain", "modern", "sleek", "default"],
+    topics: [
+      "overview",
+      "summary",
+      "introduction",
+      "getting started",
+      "basics",
+      "tutorial",
+      "guide",
+      "checklist",
+      "product",
+      "roadmap",
+      "vision",
+      "innovation",
+      "ai",
+      "software",
+      "tech",
+      "saas",
+    ],
   },
   midnight: {
-    aliases: ["midnight", "dark", "default", "sleek", "modern"],
-    topics: ["product", "roadmap", "vision", "future", "innovation", "general", "tech demo"],
+    aliases: ["midnight", "dark"],
+    topics: [],
   },
 };
+
+/** Light themes preferred for non-tech audiences when nothing else matches. */
+const LIGHT_FALLBACK_THEMES: PresentationTheme[] = [
+  "minimal",
+  "academic",
+  "corporate",
+];
 
 /** Small stable string hash (djb2) for deterministic theme fallback. */
 export function hashString(text: string): number {
@@ -98,9 +122,8 @@ export function hashString(text: string): number {
  * Decide a presentation theme DIRECTLY from the prompt, always returning one of
  * the 12 supported themes. Resolution order:
  *   1. Explicit theme name/alias in the prompt (e.g. "neon", "corporate").
- *   2. Topic/domain keywords inferred from the subject (e.g. "AI" -> cyber).
- *   3. Stable hash of the prompt across all 12 themes (deterministic + varied).
- * The result is stable: the same prompt always maps to the same theme.
+ *   2. Topic/domain keywords inferred from the subject (e.g. "finance" -> corporate).
+ *   3. Stable hash across LIGHT themes (never dark by default).
  */
 export function inferPresentationTheme(text: string): PresentationTheme {
   const lower = text.toLowerCase();
@@ -129,9 +152,9 @@ export function inferPresentationTheme(text: string): PresentationTheme {
     return best;
   }
 
-  // 3. Deterministic fallback: stable across runs, varied across prompts.
-  const idx = hashString(lower.trim()) % PRESENTATION_THEMES.length;
-  return PRESENTATION_THEMES[idx];
+  // 3. Deterministic light fallback — never midnight/cyber by default.
+  const idx = hashString(lower.trim()) % LIGHT_FALLBACK_THEMES.length;
+  return LIGHT_FALLBACK_THEMES[idx];
 }
 
 /**
@@ -147,7 +170,7 @@ export function inferPresentationTheme(text: string): PresentationTheme {
 export function extractSlideCount(text: string): { count: number; explicit: boolean } {
   const MIN_SLIDES = 3;
   const MAX_SLIDES = 20;
-  const DEFAULT_SLIDES = 6;
+  const DEFAULT_SLIDES = 8;
 
   const lower = text.toLowerCase();
 

@@ -21,6 +21,121 @@ export const IMAGE_PICKER_EXTENSIONS = [
   "jpg", "jpeg", "png", "webp", "gif", "bmp",
 ];
 
+export function fileExtension(path: string): string {
+  const base = path.split(/[/\\]/).pop() || path;
+  const dot = base.lastIndexOf(".");
+  return dot >= 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+export function isChatAttachablePath(path: string): boolean {
+  return DOCUMENT_PICKER_EXTENSIONS.includes(fileExtension(path));
+}
+
+export function isImageAttachablePath(path: string): boolean {
+  return IMAGE_PICKER_EXTENSIONS.includes(fileExtension(path));
+}
+
+/**
+ * Inspect and merge absolute paths into the chat composer attachment list.
+ * Shared by the + picker and drag-and-drop.
+ */
+export async function acceptDirectDocumentPaths(paths: string[]): Promise<void> {
+  const chatModeStore = useChatModeStore.getState();
+  const uiStore = useUIStore.getState();
+  if (paths.length === 0) return;
+
+  const currentPaths = chatModeStore.directDocumentPaths;
+  const merged = new Set(currentPaths);
+  for (const filePath of paths) {
+    merged.add(filePath);
+  }
+  const nextPaths = Array.from(merged);
+
+  try {
+    const inspected = await Api.inspectAttachments(nextPaths);
+    const accepted: string[] = [];
+    for (const original of nextPaths) {
+      const item =
+        inspected.find((entry) => sameAttachmentPath(entry.path, original)) ??
+        inspected.find(
+          (entry) =>
+            attachmentFileName(entry.path, entry.name) ===
+            attachmentFileName(original)
+        );
+      if (!item || item.error || item.kind === "unsupported") {
+        uiStore.showError(
+          item?.error || `Unsupported file: ${attachmentFileName(original)}`
+        );
+        continue;
+      }
+      chatModeStore.setAttachmentMeta(original, {
+        ...item,
+        path: original,
+        name: item.name || attachmentFileName(original),
+      });
+      accepted.push(original);
+    }
+    chatModeStore.setDirectDocumentPaths(accepted);
+  } catch (inspectErr) {
+    const message =
+      inspectErr instanceof Error ? inspectErr.message : String(inspectErr);
+    uiStore.showError(message || "Couldn't inspect those files.");
+  }
+}
+
+/** Attach OS-dropped paths to the active chat mode (text docs or vision image). */
+export async function acceptDroppedChatPaths(paths: string[]): Promise<void> {
+  const chatModeStore = useChatModeStore.getState();
+  const uiStore = useUIStore.getState();
+  const mode = chatModeStore.chatMode;
+
+  if (mode === "vision") {
+    const images = paths.filter(isImageAttachablePath);
+    if (images.length === 0) {
+      uiStore.showError("Drop an image file (JPG, PNG, WebP, GIF, or BMP).");
+      return;
+    }
+    const selected = images[0];
+    try {
+      chatModeStore.setImagePath(selected);
+      const dataUrl = await Api.readImageBase64(selected);
+      chatModeStore.setImagePreview(dataUrl);
+    } catch (err) {
+      console.error("Failed to load dropped image:", err);
+      uiStore.showError("Couldn't open that image. Please try again.");
+    }
+    return;
+  }
+
+  if (mode !== "text") {
+    uiStore.showError("Switch to Chat or Vision mode to attach dropped files.");
+    return;
+  }
+
+  const allowed = paths.filter(isChatAttachablePath);
+  if (allowed.length === 0) {
+    uiStore.showError(
+      "Those file types aren't supported as chat attachments. Try PDF, Office, images, or text."
+    );
+    return;
+  }
+  if (allowed.length < paths.length) {
+    const skipped = paths.length - allowed.length;
+    uiStore.showError(
+      skipped === 1
+        ? "One dropped item wasn't a supported file and was skipped."
+        : `${skipped} dropped items weren't supported files and were skipped.`
+    );
+  }
+
+  try {
+    await acceptDirectDocumentPaths(allowed);
+  } catch (err) {
+    console.error("Failed to attach dropped documents:", err);
+    uiStore.showError("Couldn't add those documents. Please try again.");
+  }
+}
+
 export async function selectImage(): Promise<void> {
   const chatModeStore = useChatModeStore.getState();
 
@@ -42,7 +157,6 @@ export async function selectImage(): Promise<void> {
 }
 
 export async function attachDirectDocuments(): Promise<void> {
-  const chatModeStore = useChatModeStore.getState();
   const uiStore = useUIStore.getState();
 
   try {
@@ -56,43 +170,7 @@ export async function attachDirectDocuments(): Promise<void> {
 
     const files = selection.filePaths ?? [];
     if (files.length === 0) return;
-
-    const currentPaths = useChatModeStore.getState().directDocumentPaths;
-    const merged = new Set(currentPaths);
-    for (const filePath of files) {
-      merged.add(filePath);
-    }
-    const nextPaths = Array.from(merged);
-    try {
-      const inspected = await Api.inspectAttachments(nextPaths);
-      const accepted: string[] = [];
-      for (const original of nextPaths) {
-        const item =
-          inspected.find((entry) => sameAttachmentPath(entry.path, original)) ??
-          inspected.find(
-            (entry) =>
-              attachmentFileName(entry.path, entry.name) ===
-              attachmentFileName(original)
-          );
-        if (!item || item.error || item.kind === "unsupported") {
-          uiStore.showError(
-            item?.error || `Unsupported file: ${attachmentFileName(original)}`
-          );
-          continue;
-        }
-        chatModeStore.setAttachmentMeta(original, {
-          ...item,
-          path: original,
-          name: item.name || attachmentFileName(original),
-        });
-        accepted.push(original);
-      }
-      chatModeStore.setDirectDocumentPaths(accepted);
-    } catch (inspectErr) {
-      const message =
-        inspectErr instanceof Error ? inspectErr.message : String(inspectErr);
-      uiStore.showError(message || "Couldn't inspect those files.");
-    }
+    await acceptDirectDocumentPaths(files);
   } catch (err) {
     console.error("Failed to select direct documents:", err);
     uiStore.showError("Couldn't add those documents. Please try again.");

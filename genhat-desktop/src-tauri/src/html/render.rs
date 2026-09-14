@@ -167,7 +167,7 @@ pub fn render_html_plan(plan: HtmlPlan) -> String {
     }
 
     let layout = layout_for(&plan.archetype);
-    let theme = plan.theme.as_deref().unwrap_or("midnight");
+    let theme = plan.theme.as_deref().unwrap_or("minimal");
     let title = escape_html(&plan.title);
     let tagline = plan
         .tagline
@@ -1056,14 +1056,14 @@ const MIDNIGHT_THEME: &str = r#":root {
 }"#;
 
 const SUNSET_THEME: &str = r#":root {
-  --bg: #1a0f14;
-  --surface: #2d1520;
-  --text: #fff1f2;
-  --muted: #fda4af;
-  --accent: #f43f5e;
-  --accent-2: #fb923c;
-  --hero-grad: linear-gradient(135deg, #7f1d1d 0%, #1a0f14 60%, #9a3412 100%);
-  --card-grad: linear-gradient(145deg, rgba(244,63,94,.2), rgba(251,146,60,.1));
+  --bg: #fff7ed;
+  --surface: #ffffff;
+  --text: #431407;
+  --muted: #9a3412;
+  --accent: #ea580c;
+  --accent-2: #f43f5e;
+  --hero-grad: linear-gradient(180deg, #ffffff 0%, #ffedd5 100%);
+  --card-grad: linear-gradient(145deg, #ffffff, #fff7ed);
 }"#;
 
 const MINIMAL_THEME: &str = r#":root {
@@ -1078,14 +1078,14 @@ const MINIMAL_THEME: &str = r#":root {
 }"#;
 
 const CORPORATE_THEME: &str = r#":root {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --text: #f8fafc;
-  --muted: #94a3b8;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
   --accent: #2563eb;
-  --accent-2: #38bdf8;
-  --hero-grad: linear-gradient(135deg, #0f172a, #1e3a5f);
-  --card-grad: linear-gradient(145deg, rgba(37,99,235,.18), rgba(30,41,59,.9));
+  --accent-2: #0ea5e9;
+  --hero-grad: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  --card-grad: linear-gradient(145deg, #ffffff, #f1f5f9);
 }"#;
 
 const FOREST_THEME: &str = r#":root {

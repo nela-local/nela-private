@@ -27,6 +27,7 @@ import DocGraphQueryModal from "./DocGraphQueryModal";
 import FileIndexerSetupWizard from "./FileIndexerSetupWizard";
 import ConnectorsModal from "./ConnectorsModal";
 import TelegramConnectModal from "./TelegramConnectModal";
+import TallyConnectModal from "./TallyConnectModal";
 interface AppDialogsLayerProps {
   showStartupModal: boolean;
   showFileIndexerSetup: boolean;
@@ -87,6 +88,7 @@ export default function AppDialogsLayer({
       <DocGraphQueryModal />
       <ConnectorsModal />
       <TelegramConnectModal />
+      <TallyConnectModal />
 
       {showFileIndexerSetup && (
         <FileIndexerSetupWizard

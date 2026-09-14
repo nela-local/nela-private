@@ -41,7 +41,8 @@ export default function ConnectorsPanel() {
 
   const isStorageConnection = (providerId: string) => {
     const p = providers.find((x) => x.id === providerId);
-    return p ? isStorageProvider(p) : providerId !== "gmail";
+    // Unknown providers are not storage — avoid Browse on chat-only connectors (Tally, etc.).
+    return p ? isStorageProvider(p) : false;
   };
 
   return (

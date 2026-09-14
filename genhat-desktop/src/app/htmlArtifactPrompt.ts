@@ -4,6 +4,7 @@
  */
 
 import { NELA_NUMERICAL_ACCURACY_RULES } from "./nelaSystemPrompt";
+import { NELA_ARTIFACT_AUDIENCE_VISUAL_RULES } from "./artifactAudiencePrompt";
 
 export const HTML_PLAN_MAX_TOKENS = 16_384;
 /** Freeform HTML — allow long pages; capped only by model completion limit upstream. */
@@ -25,16 +26,19 @@ OUTPUT FORMAT (mandatory):
 
 CRITICAL CONTENT RULES:
 - Do NOT return JSON. Do NOT use a fixed HERO / GRID / STATS / FAQ section schema.
-- Invent your own layout, typography, color system, and structure that fit the topic.
+- Invent your own layout, typography, color system, and structure that fit the topic — but keep it LIGHT and readable for non-tech users.
 - Put meaningful page content in the body before long CSS when possible.
-- Keep CSS reasonably compact; prefer one cohesive design over many competing effects.
-- Content must be rich and specific to the USER'S TOPIC (real places, offerings, tone).
+- Keep CSS reasonably compact; prefer one cohesive light design over dark neon effects.
+- Content must be rich and specific to the USER'S TOPIC: real explanations, examples, and enough prose that a non-expert can learn from the page (not a sparse marketing shell).
+- Prefer substantial sections (paragraphs + clear headings) over empty hero-only pages.
 - Use web research only as supporting facts — never let off-topic search results replace the subject.
 - Set <title> to a short accurate page title.
 - Self-contained: inline <style>. Do NOT write Chart.js, Plotly, or hand-rolled echarts.init / chart config JS.
 - NEVER invent nela-chart markers. Only when an AVAILABLE CHARTS catalog is provided, embed with <div data-nela-chart="nela-chart:0"></div> using those exact indices.
 - When AVAILABLE IMAGES are listed, embed them with <img src="nela-img:0"> (or :1, :2, …). Do not invent image URLs.
 - No markdown fences around the HTML.
+
+${NELA_ARTIFACT_AUDIENCE_VISUAL_RULES}
 
 ${NELA_NUMERICAL_ACCURACY_RULES}`;
 
@@ -79,21 +83,21 @@ export type HtmlChartType = (typeof HTML_CHART_TYPES)[number];
 /** Suggested palette per page type when the prompt does not imply a theme. */
 export function defaultThemeForArchetype(archetype: string): HtmlRendererTheme {
   const map: Record<string, HtmlRendererTheme> = {
-    landing: "midnight",
+    landing: "corporate",
     local_business: "sunset",
-    article: "minimal",
-    portfolio: "rose",
-    dashboard: "aurora",
+    article: "paper",
+    portfolio: "minimal",
+    dashboard: "corporate",
     documentation: "minimal",
     event: "rose",
     comparison: "corporate",
     catalog: "minimal",
     resume: "minimal",
-    infographic: "forest",
-    newsletter: "rose",
-    interactive: "midnight",
+    infographic: "academic",
+    newsletter: "paper",
+    interactive: "minimal",
   };
-  return map[archetype] ?? "midnight";
+  return map[archetype] ?? "minimal";
 }
 
 /** Map legacy or presentation theme names to renderer palettes. */
@@ -109,7 +113,7 @@ export function mapHtmlRendererTheme(theme: string): HtmlRendererTheme {
     neon: "neon",
     slate: "slate",
   };
-  return map[theme] ?? "midnight";
+  return map[theme] ?? "minimal";
 }
 
 const ARCHETYPE_SECTIONS: Record<string, { kinds: HtmlSectionKind[]; hint: string }> = {
@@ -213,12 +217,14 @@ Section kind reference:
 - TEXT: article paragraphs in body
 
 Rules:
-- Fill EVERY required section with real, topic-specific content (no lorem ipsum).
-- Use at least 3 items in GRID sections; at least 2 in FAQ/QUOTES when present.
+- Fill EVERY required section with real, topic-specific content (no lorem ipsum). Write enough prose that a non-expert learns something — not sparse labels.
+- Use at least 3 items in GRID sections; at least 2 in FAQ/QUOTES when present. Prefer detailed detail/body fields (1–3 sentences).
 - Dashboard archetype: include four CHART sections with mixed chart_type (not all bars) when source data allows.
 - For interactive archetype: GRID must list actual pickable items, never marketing bullets.
-- Pick theme that fits the topic (food/local → sunset or rose, tech → cyber or midnight, data → aurora or corporate).
+- Theme: default LIGHT (minimal, corporate, paper, academic). Use midnight/cyber/neon only if the user explicitly asks for dark mode.
 - No markdown, no code fences, no explanations outside JSON.
+
+${NELA_ARTIFACT_AUDIENCE_VISUAL_RULES}
 
 ${NELA_NUMERICAL_ACCURACY_RULES}`;
 
@@ -309,7 +315,8 @@ export function htmlPlanRequest(
   if (options?.cloudMode === "html") {
     return (
       `Write a complete HTML webpage for: "${text}". ` +
-      `Stay on this exact subject. ` +
+      `Stay on this exact subject. Use a LIGHT, readable design (white/cream background, dark text) unless dark mode was requested. ` +
+      `Include substantial plain-language content a non-expert can follow — not a sparse marketing shell. ` +
       `If this is a dashboard / analytics request, place nela-chart markers for host-rendered charts (never hand-write Chart.js). ` +
       `Wrap the document in <nela-artifact type="text/html" title="Short Page Title" filename="Short File Name">...</nela-artifact>. ` +
       `filename is the download name (no extension) — never paste the user's full prompt. ` +

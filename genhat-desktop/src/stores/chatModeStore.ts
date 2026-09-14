@@ -42,8 +42,10 @@ interface ChatModeState {
   enrichmentStatus: string | null;
   webEnabled: boolean;
   fileIndexerEnabled: boolean;
-  /** Live status while a tool runs (e.g. web search) — shown above the streaming bubble. */
+  /** Live status while a tool runs (e.g. web search) — shown in the streaming bubble. */
   liveToolStatus: string | null;
+  /** Progressive Cursor-style tool steps (completed stay visible). */
+  liveToolSteps: Array<{ id: string; label: string; active: boolean }>;
   imagePath: string | null;
   imagePreview: string | null;
   directDocumentPaths: string[];
@@ -69,6 +71,9 @@ interface ChatModeActions {
   setWebEnabled: (enabled: boolean) => void;
   setFileIndexerEnabled: (enabled: boolean) => void;
   setLiveToolStatus: (status: string | null) => void;
+  pushLiveToolStep: (label: string) => void;
+  completeLiveToolSteps: () => void;
+  clearLiveToolSteps: () => void;
   setImagePath: (path: string | null) => void;
   setImagePreview: (preview: string | null) => void;
   setDirectDocumentPaths: (paths: string[]) => void;
@@ -101,6 +106,7 @@ export const useChatModeStore = create<ChatModeState & ChatModeActions>((set) =>
   webEnabled: true,
   fileIndexerEnabled: true,
   liveToolStatus: null,
+  liveToolSteps: [],
   imagePath: null,
   imagePreview: null,
   directDocumentPaths: [],
@@ -136,7 +142,39 @@ export const useChatModeStore = create<ChatModeState & ChatModeActions>((set) =>
   setFileIndexerEnabled: (fileIndexerEnabled) => set({ fileIndexerEnabled }),
   
   setLiveToolStatus: (liveToolStatus) => set({ liveToolStatus }),
-  
+
+  pushLiveToolStep: (label) =>
+    set((state) => {
+      const trimmed = label.trim();
+      if (!trimmed) return state;
+      const last = state.liveToolSteps[state.liveToolSteps.length - 1];
+      if (last?.active && last.label === trimmed) return state;
+      const completed = state.liveToolSteps.map((s) =>
+        s.active ? { ...s, active: false } : s
+      );
+      return {
+        liveToolStatus: trimmed,
+        liveToolSteps: [
+          ...completed,
+          {
+            id: `step-${Date.now()}-${completed.length}`,
+            label: trimmed,
+            active: true,
+          },
+        ].slice(-12),
+      };
+    }),
+
+  completeLiveToolSteps: () =>
+    set((state) => ({
+      liveToolStatus: null,
+      liveToolSteps: state.liveToolSteps.map((s) =>
+        s.active ? { ...s, active: false } : s
+      ),
+    })),
+
+  clearLiveToolSteps: () => set({ liveToolStatus: null, liveToolSteps: [] }),
+
   setImagePath: (imagePath) => set({ imagePath }),
   
   setImagePreview: (imagePreview) => set({ imagePreview }),

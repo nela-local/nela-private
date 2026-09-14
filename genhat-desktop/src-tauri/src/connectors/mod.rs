@@ -24,6 +24,7 @@ pub mod mirror;
 pub mod oauth_client;
 pub mod providers;
 pub mod registry;
+pub mod tally;
 pub mod types;
 
 pub use error::ConnectorError;

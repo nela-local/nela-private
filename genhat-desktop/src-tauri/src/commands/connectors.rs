@@ -210,8 +210,10 @@ pub async fn connectors_disconnect(
     // Provider-id disconnect for account-lifecycle connectors (e.g. "gmail", "telegram").
     if let Some(def) = crate::connectors::catalog::find_definition(&connection_id) {
         if def.id == "gmail"
+            || def.id == "tally"
             || def.connect_flow == "desktop_pkce"
             || def.connect_flow == "telegram_mtproto"
+            || def.connect_flow == "tally_localhost"
         {
             if let Some(backend) = crate::connectors::backend::get_backend(&connection_id) {
                 return backend

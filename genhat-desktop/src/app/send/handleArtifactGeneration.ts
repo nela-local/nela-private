@@ -291,9 +291,9 @@ export async function handleArtifactGeneration(
         : next;
     };
 
-    // Doc Graph search only for explicit ambient file intent (/files, "find my resume", path).
-    // Do NOT run just because the "Search my files" toggle is on — that only exposes the
-    // search_knowledge_base tool for the model to call when it chooses.
+    // Doc Graph search only when the user explicitly forced it (/files).
+    // Never keyword-match prompts into a host-side search — the model must call
+    // search_knowledge_base when it needs local files.
     if (!attachedFile && wantsAmbientFileSearch) {
       updateArtifactMsg("SearchingDisk");
       const searchQuery =
@@ -839,9 +839,11 @@ SOURCE + USER-BRIEF RULES (mandatory):
       schemaId === "presentation_synthesis"
         ? cloudPresentationFreeform
           ? hasSourceDocument
-            ? `Write a complete HTML presentation deck for this USER REQUEST: "${text}". Follow that brief (structure, named gaps, cost-benefit, template). Ground claims in the ATTACHED SOURCE DOCUMENT; do not dump file paths or raw extractor text. Wrap in <nela-artifact type="text/html" title="...">. Put ALL slide body content BEFORE CSS. Each .slide must be a 16:9 page (1280x720 or 1920x1080) with box-sizing:border-box; size charts/SVG with explicit pixels. Close </html> and </nela-artifact>. Do not stop mid-slide.`
+            ? `Write a complete HTML presentation deck for this USER REQUEST: "${text}". Follow that brief (structure, named gaps, cost-benefit, template). Ground claims in the ATTACHED SOURCE DOCUMENT; do not dump file paths or raw extractor text. Use a LIGHT readable design (white/cream background, dark text) with detailed plain-language slide copy for non-experts. Wrap in <nela-artifact type="text/html" title="...">. Put ALL slide body content BEFORE CSS. Each .slide must be a 16:9 page (1280x720 or 1920x1080) with box-sizing:border-box; size charts/SVG with explicit pixels. Close </html> and </nela-artifact>. Do not stop mid-slide.`
             : `Write a complete HTML presentation deck about: "${text}". ` +
               `Stay on this exact subject — do not pivot to worksheets, crafts, or unrelated products. ` +
+              `Use a LIGHT readable design (white/cream background, dark text) unless dark mode was requested. ` +
+              `Prefer 8–12 detailed slides with substantial plain-language bullets/paragraphs (not sparse titles). ` +
               `Wrap in <nela-artifact type="text/html" title="...">. Put ALL slide body content BEFORE CSS. Each .slide must be a 16:9 page (1280x720 or 1920x1080); size charts/SVG with explicit pixels. Close </html> and </nela-artifact>. Do not stop mid-slide.`
           : hasSourceDocument
             ? `Create a ${slidePlan.count}-slide deck for this USER REQUEST: "${text}". Follow the requested outline and named gaps. Use the ATTACHED SOURCE DOCUMENT as evidence only — no placeholders, no file-path bullets.${themeSuffix}`

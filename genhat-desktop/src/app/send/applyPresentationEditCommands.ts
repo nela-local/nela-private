@@ -828,7 +828,7 @@ async function applyNelaStyleCommands(args: {
     // PPTX → HTML conversion happens inside applyPresentationOps; overrides
     // are stamped on the rendered HTML afterwards.
     if (rustOps.length === 0 && hasOverrides) {
-      rustOps.push({ op: "set_theme", theme: parsed.theme ?? "midnight" });
+      rustOps.push({ op: "set_theme", theme: parsed.theme ?? "minimal" });
     }
     const result = await Api.applyPresentationOps({
       path: currentPath,

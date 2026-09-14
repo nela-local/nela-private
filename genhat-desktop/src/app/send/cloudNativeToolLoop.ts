@@ -48,10 +48,70 @@ import { looksLikeTelegramRequest } from "./telegramConnectIntent";
 import { useGmailConnectPromptStore } from "../../stores/gmailConnectPromptStore";
 import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromptStore";
 import { looksLikeDriveRequest } from "./driveConnectIntent";
+import { looksLikeTallyRequest } from "./tallyConnectIntent";
 import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
 const MAX_CHART_PREP_ROUNDS = 6;
+/** Local generate_html can hang on huge IPC payloads — never block the chat forever. */
+const GENERATE_HTML_TIMEOUT_MS = 90_000;
+const MAX_GENERATE_HTML_CHARS = 400_000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `${label} timed out after ${Math.round(ms / 1000)}s. Try a smaller dashboard (fewer tables / charts).`
+              )
+            ),
+          ms
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Normalize model tool args into an HtmlPlan-shaped payload the Rust command accepts. */
+function normalizeGenerateHtmlPayload(
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  const plan: Record<string, unknown> = { ...args };
+
+  const hasSections =
+    Array.isArray(plan.sections) && (plan.sections as unknown[]).length > 0;
+  if (!hasSections && Array.isArray(plan.pages)) {
+    plan.sections = plan.pages;
+  }
+  delete plan.pages;
+
+  if (!Array.isArray(plan.sections)) plan.sections = [];
+  if (typeof plan.archetype !== "string" || !String(plan.archetype).trim()) {
+    plan.archetype = "landing";
+  }
+  if (typeof plan.title !== "string" || !String(plan.title).trim()) {
+    plan.title = "Dashboard";
+  }
+
+  if (typeof plan.html === "string" && plan.html.length > MAX_GENERATE_HTML_CHARS) {
+    plan.html =
+      plan.html.slice(0, MAX_GENERATE_HTML_CHARS) +
+      "\n<!-- NELA: html truncated for size -->";
+  }
+
+  return plan;
+}
 
 export interface CloudNativeToolLoopOptions {
   messages: CloudChatMessage[] | ChatContextMessage[];
@@ -329,13 +389,67 @@ async function executeToolCall(
         content:
           `Local knowledge-graph results for "${query}" (top_k=${topK}):\n\n${md}\n\n` +
           `Use these expanded sources as the primary source of truth for local-file questions. ` +
-          `${citeHint} Do not claim you cannot access the user's files.`,
+          `${citeHint} Do not claim you cannot access the user's files. ` +
+          `If you need more of a specific file, call local_shell with cat/head/grep on its absolute path.`,
         webSearchResult: merged,
       };
     } catch (e) {
       opts.onToolStatus?.(null);
       return {
         content: `search_knowledge_base failed: ${e}`,
+        webSearchResult,
+      };
+    }
+  }
+
+  if (name === "local_shell") {
+    const rawArgv = args.argv;
+    const argv = Array.isArray(rawArgv)
+      ? (rawArgv as unknown[])
+          .filter((a): a is string => typeof a === "string")
+          .map((a) => a.trim())
+          .filter(Boolean)
+      : [];
+    if (argv.length === 0) {
+      return {
+        content:
+          'local_shell requires argv: string[] e.g. ["cat","/abs/path/file.txt"]',
+        webSearchResult,
+      };
+    }
+    const cwd =
+      typeof args.cwd === "string" && args.cwd.trim()
+        ? args.cwd.trim()
+        : null;
+    const display = argv.join(" ");
+    opts.onToolStatus?.(`Running ${display.slice(0, 80)}`);
+    try {
+      const result = await Api.localShellRun(argv, cwd);
+      opts.onToolStatus?.(null);
+      const parts: string[] = [
+        `Command: ${result.command}`,
+        result.ok ? "Status: ok" : `Status: failed (${result.error ?? "error"})`,
+      ];
+      if (result.exitCode != null) {
+        parts.push(`Exit code: ${result.exitCode}`);
+      }
+      if (result.stdout.trim()) {
+        parts.push(`stdout:\n${result.stdout}`);
+      }
+      if (result.stderr.trim()) {
+        parts.push(`stderr:\n${result.stderr}`);
+      }
+      if (result.truncated) {
+        parts.push("(output truncated)");
+      }
+      if (!result.stdout.trim() && !result.stderr.trim() && result.error) {
+        parts.push(result.error);
+      }
+      return { content: parts.join("\n\n"), webSearchResult };
+    } catch (e) {
+      opts.onToolStatus?.(null);
+      return {
+        content: `local_shell failed: ${e}`,
         webSearchResult,
       };
     }
@@ -464,16 +578,33 @@ async function executeToolCall(
   if (name === "generate_html") {
     try {
       const pool = opts.chartPool?.list() ?? [];
-      const payload = { ...(args as Record<string, unknown>) };
+      const payload = normalizeGenerateHtmlPayload(
+        args as Record<string, unknown>
+      );
       if (
         pool.length &&
         typeof payload.html === "string" &&
         payload.html.trim()
       ) {
+        opts.onToolStatus?.("Embedding charts in HTML…");
         payload.html = embedPoolChartsInHtml(payload.html, pool);
+        if (
+          typeof payload.html === "string" &&
+          payload.html.length > MAX_GENERATE_HTML_CHARS
+        ) {
+          payload.html =
+            payload.html.slice(0, MAX_GENERATE_HTML_CHARS) +
+            "\n<!-- NELA: html truncated for size -->";
+        }
       }
-      const artifact = await Api.generateHtml(payload as never);
+      opts.onToolStatus?.("Writing HTML artifact…");
+      const artifact = await withTimeout(
+        Api.generateHtml(payload as never),
+        GENERATE_HTML_TIMEOUT_MS,
+        "generate_html"
+      );
       opts.onArtifact?.(artifact);
+      opts.onToolStatus?.(null);
       return {
         content: JSON.stringify({
           ok: true,
@@ -484,6 +615,7 @@ async function executeToolCall(
         artifact,
       };
     } catch (e) {
+      opts.onToolStatus?.(null);
       return {
         content: `generate_html failed: ${e}`,
         webSearchResult,
@@ -624,6 +756,78 @@ async function executeToolCall(
     };
   }
 
+  if (name === "tally_status") {
+    try {
+      const status = await Api.tallyStatus();
+      return { content: JSON.stringify(status), webSearchResult };
+    } catch (e) {
+      return {
+        content: JSON.stringify({ connected: false, error: String(e) }),
+        webSearchResult,
+      };
+    }
+  }
+
+  if (name === "tally_list_ledgers") {
+    const { executeTallyListLedgers } = await import("./tallyTools");
+    const result = await executeTallyListLedgers(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
+  if (name === "tally_trial_balance") {
+    const { executeTallyTrialBalance } = await import("./tallyTools");
+    const result = await executeTallyTrialBalance(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
+  if (name === "tally_daybook") {
+    const { executeTallyDaybook } = await import("./tallyTools");
+    const result = await executeTallyDaybook(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
+  if (name === "tally_outstanding") {
+    const { executeTallyOutstanding } = await import("./tallyTools");
+    const result = await executeTallyOutstanding(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
+  if (name === "tally_live_dashboard") {
+    const { executeTallyLiveDashboard } = await import("./tallyTools");
+    const result = await executeTallyLiveDashboard(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+      onArtifact: opts.onArtifact,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+      artifact:
+        result &&
+        typeof result === "object" &&
+        "ok" in result &&
+        result.ok &&
+        "path" in result
+          ? {
+              path: result.path,
+              kind: result.kind ?? "html",
+            }
+          : undefined,
+    };
+  }
+
   return {
     content: `Unknown tool: ${name}`,
     webSearchResult,
@@ -655,6 +859,9 @@ async function executeToolCallsParallel(
     opts.onToolStatus?.(
       `Searching knowledge base (${kbCount} queries)`
     );
+  } else {
+    const summary = summarizeToolRound(toolCalls);
+    if (summary) opts.onToolStatus?.(summary);
   }
 
   const results = await Promise.all(
@@ -671,6 +878,48 @@ async function executeToolCallsParallel(
   }
   opts.onToolStatus?.(null);
   return { results, webSearchResult: merged, artifacts };
+}
+
+function summarizeToolRound(toolCalls: CloudToolCall[]): string | null {
+  if (!toolCalls.length) return null;
+  const labels = toolCalls.map((c) => {
+    switch (c.function.name) {
+      case "web_search":
+        return "Searching the web";
+      case "search_knowledge_base":
+      case "file_search":
+        return "Searching your files";
+      case "local_shell":
+        return "Reading a local file";
+      case "tally_status":
+        return "Checking Tally connection";
+      case "tally_list_ledgers":
+        return "Exporting Tally ledgers";
+      case "tally_trial_balance":
+        return "Exporting trial balance";
+      case "tally_daybook":
+        return "Exporting day book";
+      case "tally_outstanding":
+        return "Exporting outstanding balances";
+      case "tally_live_dashboard":
+        return "Opening live Tally dashboard";
+      case "render_chart":
+        return "Preparing chart";
+      case "generate_html":
+        return "Building HTML";
+      case "gmail_list_messages":
+      case "gmail_get_message":
+        return "Reading Gmail";
+      case "gmail_send":
+        return "Sending email";
+      default:
+        return c.function.name.replace(/_/g, " ");
+    }
+  });
+  const unique = [...new Set(labels)];
+  if (unique.length === 1) return unique[0]!;
+  if (unique.length === 2) return `${unique[0]} · ${unique[1]}`;
+  return `${unique[0]} + ${unique.length - 1} more`;
 }
 
 /**
@@ -824,6 +1073,12 @@ export async function runCloudNativeToolLoop(
   } catch {
     driveEnabled = false;
   }
+  let tallyEnabled = false;
+  try {
+    tallyEnabled = Boolean((await Api.tallyStatus()).connected);
+  } catch {
+    tallyEnabled = false;
+  }
   const tools = buildCloudChatTools({
     webEnabled,
     fileSearchEnabled,
@@ -833,6 +1088,7 @@ export async function runCloudNativeToolLoop(
     gmailEnabled,
     telegramEnabled,
     driveEnabled,
+    tallyEnabled,
   });
 
   let messages = toCloudMessages(loopOpts.messages);
@@ -855,6 +1111,7 @@ export async function runCloudNativeToolLoop(
       t.function.name === "drive_list_recent" ||
       t.function.name === "drive_get"
   );
+  const hasTally = tools.some((t) => t.function.name.startsWith("tally_"));
   if (
     hasWebSearch ||
     hasFileSearch ||
@@ -862,7 +1119,8 @@ export async function runCloudNativeToolLoop(
     hasAskFollowUp ||
     hasGmail ||
     hasTelegram ||
-    hasDrive
+    hasDrive ||
+    hasTally
   ) {
     const parts: string[] = [];
     if (hasWebSearch) {
@@ -882,6 +1140,12 @@ export async function runCloudNativeToolLoop(
           "Prefer higher top_k (25–40) so graph retrieval can surface related chunks; use 10–15 only for pinpoint lookups. " +
           "For multiple facets, emit several search_knowledge_base tool calls in the same turn — they run in parallel. " +
           "Cite local sources with inline [n] markers only (no raw file paths or Sources list)."
+      );
+      parts.push(
+        "You also have local_shell for deep-reading files after search_knowledge_base returns absolute paths. " +
+          "Allowed argv programs only: ls, cat, head, tail, wc, grep, rg, find (no -exec/-delete). " +
+          'Pass argv as a string array, e.g. ["head","-n","50","/abs/path"]. Never bash/sh -c, pipes, or writes. ' +
+          "Typical flow: search_knowledge_base → local_shell on a returned path when snippets are insufficient."
       );
     }
     if (hasRenderChart) {
@@ -976,6 +1240,30 @@ export async function runCloudNativeToolLoop(
         parts.push(
           "Google Drive is not connected. Tell the user to tap Connect Drive on the card in chat " +
             "(or Settings → Connections). Never invent Drive file links or contents."
+        );
+      }
+    }
+    if (hasTally) {
+      parts.push(
+        "You can read TallyPrime (localhost XML HTTP, read-only): " +
+          "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding; " +
+          "tally_live_dashboard (LIVE KPIs/charts that Refresh from Tally — use this for any dashboard/visualization). " +
+          "For charts/dashboards: call tally_live_dashboard only — do NOT bake figures into generate_html. " +
+          "Use tally_* exports for Q&A about specific balances. " +
+          "The user may need to Allow once (live dashboard grants session refresh). Never invent balances."
+      );
+    } else {
+      const lastUser = [...messages]
+        .reverse()
+        .find((m) => m.role === "user");
+      const lastUserText = lastUser
+        ? flattenMessageContent(lastUser.content)
+        : "";
+      if (looksLikeTallyRequest(lastUserText)) {
+        parts.push(
+          "Tally is not connected. Tell the user to open Settings → Connections → Connect Tally " +
+            "(enable HTTP Server in TallyPrime on localhost, usually port 9000). " +
+            "Never invent accounting figures."
         );
       }
     }
@@ -1081,6 +1369,7 @@ export async function runCloudNativeToolLoop(
       }
 
       if (round + 1 < MAX_TOOL_ROUNDS) {
+        loopOpts.onToolStatus?.("Thinking…");
         const remaining = MAX_TOOL_ROUNDS - (round + 1);
         const nextHintParts: string[] = [
           `You have ~${remaining} tool rounds left.`,
@@ -1092,7 +1381,7 @@ export async function runCloudNativeToolLoop(
         }
         if (hasFileSearch) {
           nextHintParts.push(
-            "Only if you still need local-file context the user asked about, call search_knowledge_base (multiple parallel calls OK) with refined queries."
+            "Only if you still need local-file context the user asked about, call search_knowledge_base (multiple parallel calls OK) with refined queries, then local_shell to deep-read absolute paths."
           );
         }
         nextHintParts.push(
@@ -1202,7 +1491,7 @@ export async function runCloudArtifactWebResearch(opts: {
           : "artifact";
 
   const localHint = fileSearchEnabled
-    ? " You may optionally call search_knowledge_base with SHORT keyword queries if (and only if) the request clearly needs the user's indexed local files. Do not search local files for general travel / web topics. "
+    ? " You may optionally call search_knowledge_base with SHORT keyword queries if (and only if) the request clearly needs the user's indexed local files; use local_shell afterward to deep-read absolute paths. Do not search local files for general travel / web topics. "
     : attachedNames.length > 0
       ? ` The user already attached: ${attachedNames.join(", ")}. Those files will be loaded for the artifact. Do not call search_knowledge_base. Only web-search for public facts missing from the attachments. `
       : " ";
@@ -1259,7 +1548,7 @@ export async function runCloudArtifactWebResearch(opts: {
   const mustCallHint =
     "Call the web_search tool with concise keyword queries and depth (snippet|full|standard|deep) when you need live web facts. " +
     (fileSearchEnabled
-      ? "Call search_knowledge_base only when the user clearly needs their local indexed files — never for general travel/web research. "
+      ? "Call search_knowledge_base only when the user clearly needs their local indexed files — never for general travel/web research. Use local_shell afterward to deep-read absolute paths when snippets are insufficient. "
       : "") +
     "Do not invent tool results.";
   messages = [
@@ -1355,7 +1644,7 @@ export async function runCloudArtifactWebResearch(opts: {
       if (webSearchResult && round + 1 < MAX_ARTIFACT_WEB_RESEARCH_ROUNDS) {
         const remaining = MAX_ARTIFACT_WEB_RESEARCH_ROUNDS - (round + 1);
         const localRoundHint = fileSearchEnabled
-          ? " Call search_knowledge_base (parallel calls OK) only if a local-file facet is clearly needed."
+          ? " Call search_knowledge_base (parallel calls OK) only if a local-file facet is clearly needed; use local_shell to deep-read returned paths."
           : "";
         messages = [
           ...messages,

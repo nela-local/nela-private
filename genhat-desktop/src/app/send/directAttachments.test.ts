@@ -60,6 +60,10 @@ describe("direct attachment routing", () => {
       false
     );
     assert.equal(
+      tools.some((t) => t.function.name === "local_shell"),
+      false
+    );
+    assert.equal(
       tools.some((t) => t.function.name === "web_search"),
       true
     );
@@ -72,6 +76,10 @@ describe("direct attachment routing", () => {
     });
     assert.equal(
       tools.some((t) => t.function.name === "search_knowledge_base"),
+      true
+    );
+    assert.equal(
+      tools.some((t) => t.function.name === "local_shell"),
       true
     );
   });

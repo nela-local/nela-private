@@ -25,3 +25,5 @@ pub mod gmail;
 pub mod telegram;
 pub mod drive;
 pub mod connectors;
+pub mod local_shell;
+pub mod tally;
