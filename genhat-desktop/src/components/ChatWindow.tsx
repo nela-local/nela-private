@@ -197,7 +197,6 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
    *  We use state (not a ref) so ESLint doesn't flag .current reads during render. */
   const [prevMsgCount, setPrevMsgCount] = useState(0);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: track previous render's msg count
     setPrevMsgCount(messages.length);
   }, [messages.length]);
 
@@ -215,6 +214,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
     return out;
   }, [messages]);
 
+  // TanStack Virtual returns unstable function identities; React Compiler skips memoization here by design.
+  // eslint-disable-next-line react-hooks/incompatible-library -- intentional virtualizer usage
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => messagesParentRef.current,
@@ -1030,6 +1031,19 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         )}
 
         {/* Audio Player (legacy block removed; now only rendered inline after assistant messages) */}
+
+        {/* Response time completion (advanced only; keeps simple mode calmer) */}
+        {advanced && chatMode !== "audio" && generalGenerationTime !== null && !generalGenerating && (
+          <div className="flex items-center gap-1.5 py-1 px-3 rounded-full max-w-3xl mx-auto text-[0.78rem] text-success">
+            <span>✓</span>
+            <span>
+              {chatMode === "vision" && `Analyzed in ${generalGenerationTime.toFixed(1)}s`}
+              {chatMode === "rag" && `Processed in ${generalGenerationTime.toFixed(1)}s`}
+              {chatMode === "text" && `Generated in ${generalGenerationTime.toFixed(1)}s`}
+              {chatMode === "mindmap" && `Mindmap built in ${generalGenerationTime.toFixed(1)}s`}
+            </span>
+          </div>
+        )}
 
         {/* Cancelled notice */}
         {cancelled && (

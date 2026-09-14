@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { MessageCircle, X } from "lucide-react";
 import {
   resolveTelegramSendConfirm,
@@ -16,14 +16,10 @@ export default function TelegramSendConfirmCard() {
   if (pending && requestId !== initId) {
     setInitId(requestId);
     setDraft(pending.draft);
+  } else if (!pending && initId !== null) {
+    setInitId(null);
+    setDraft(null);
   }
-
-  useEffect(() => {
-    if (!pending) {
-      setDraft(null);
-      setInitId(null);
-    }
-  }, [pending]);
 
   if (!pending || !draft) return null;
 

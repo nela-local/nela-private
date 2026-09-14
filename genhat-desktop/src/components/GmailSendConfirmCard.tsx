@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Mail, X } from "lucide-react";
 import {
   resolveGmailSendConfirm,
@@ -31,14 +31,12 @@ export default function GmailSendConfirmCard() {
     setDraft(pending.draft);
     setToInput(listToInput(pending.draft.to));
     setCcInput(listToInput(pending.draft.cc));
+  } else if (!pending && initId !== null) {
+    setInitId(null);
+    setDraft(null);
+    setToInput("");
+    setCcInput("");
   }
-
-  useEffect(() => {
-    if (!pending) {
-      setDraft(null);
-      setInitId(null);
-    }
-  }, [pending]);
 
   if (!pending || !draft) return null;
 

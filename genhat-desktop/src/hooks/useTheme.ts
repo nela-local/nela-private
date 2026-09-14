@@ -42,7 +42,11 @@ function subscribeDomTheme(onChange: () => void) {
 
 /** Theme-aware brand mark — matches NELA-Webpage light/dark logo swap. */
 export function useNelaLogoSrc(): string {
-  const theme = useSyncExternalStore(subscribeDomTheme, readDomTheme, () => "professional");
+  const theme = useSyncExternalStore(
+    subscribeDomTheme,
+    readDomTheme,
+    (): ThemeName => "professional"
+  );
   return logoSrcForTheme(theme);
 }
 
