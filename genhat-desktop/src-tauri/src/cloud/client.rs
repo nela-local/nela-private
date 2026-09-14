@@ -703,7 +703,6 @@ pub async fn chat_stream(
                 Ok(None) => break,
                 Err(_) => {
                     if !emitted_done {
-                        emitted_done = true;
                         let _ = app.emit(
                             "cloud-chat-stream",
                             serde_json::json!({

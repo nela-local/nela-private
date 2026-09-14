@@ -113,6 +113,7 @@ impl McpCoordinator {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        #[cfg(windows)]
         crate::windows_spawn::hide_console_std(&mut spawn_cmd);
         let mut child = spawn_cmd
             .spawn()
