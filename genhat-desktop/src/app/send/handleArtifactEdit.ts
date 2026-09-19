@@ -8,6 +8,8 @@ import {
   type ArtifactEditKind,
 } from "../artifactEdit";
 import type { SendHandlerContext } from "./types";
+import { isPrivateMode } from "../cloudPresentationMode";
+import { COPY } from "../copy";
 
 export type ArtifactEditOptions = {
   attachedPaths?: string[];
@@ -28,6 +30,26 @@ export async function handleArtifactEdit(
   ctrl: AbortController,
   options?: ArtifactEditOptions
 ): Promise<void> {
+  if (isPrivateMode()) {
+    if (options?.previewMode) {
+      options.onStatus?.(COPY.privateModeArtifactsCloudOnly, "error");
+      return;
+    }
+    ctx.updateSession(sid, (prev) => ({
+      loading: false,
+      streamingContent: "",
+      messages: [
+        ...prev.messages,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: COPY.privateModeArtifactsCloudOnly,
+        },
+      ],
+    }));
+    return;
+  }
+
   const session = ctx.sessions.find((s) => s.id === sid);
 
   if (!artifactPath) {

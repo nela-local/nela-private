@@ -29,6 +29,7 @@ import { normalizeWebToolDepth, runWebSearchWithDepth } from "./webSearchDepth";
 import { knowledgeBaseToSearchResult, fileUrlToPath, isLocalFileHitUrl } from "./fileSearchCitations";
 import {
   executeTallyDaybook,
+  executeTallyExportExcel,
   executeTallyListLedgers,
   executeTallyLiveDashboard,
   executeTallyOutstanding,
@@ -57,6 +58,11 @@ import {
   type ChartPoolEntry,
 } from "../artifactChartPool";
 import { normalizeSpreadsheetPlan } from "../spreadsheetPlan";
+import {
+  ARTIFACT_CREATING_TOOLS,
+  isPrivateMode,
+} from "../cloudPresentationMode";
+import { COPY } from "../copy";
 import { currentQuarter } from "../nelaSystemPrompt";
 import { beginAskFollowUpTurn } from "../../stores/followUpStore";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
@@ -165,6 +171,8 @@ export interface CloudNativeToolLoopOptions {
   onArtifact?: (artifact: ArtifactResult) => void;
   /** Stable id so ask_followup is limited to once per user turn. */
   askFollowUpTurnId?: string;
+  /** Absolute paths of attached .xlsx/.xls/.csv for Tally template matching. */
+  attachmentSpreadsheetPaths?: string[];
 };
 
 export interface CloudNativeToolLoopResult {
@@ -300,6 +308,17 @@ async function executeToolCall(
   } catch {
     return {
       content: `Invalid JSON arguments for ${name}`,
+      webSearchResult,
+    };
+  }
+
+  if (isPrivateMode() && ARTIFACT_CREATING_TOOLS.has(name)) {
+    return {
+      content: JSON.stringify({
+        ok: false,
+        reason: "private_mode",
+        error: COPY.privateModeArtifactsCloudOnly,
+      }),
       webSearchResult,
     };
   }
@@ -839,6 +858,30 @@ async function executeToolCall(
     };
   }
 
+  if (name === "tally_export_excel") {
+    const result = await executeTallyExportExcel(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+      onArtifact: opts.onArtifact,
+      attachmentSpreadsheetPaths: opts.attachmentSpreadsheetPaths,
+    });
+    return {
+      content: JSON.stringify(result),
+      webSearchResult,
+      artifact:
+        result &&
+        typeof result === "object" &&
+        "ok" in result &&
+        result.ok &&
+        "path" in result
+          ? {
+              path: result.path,
+              kind: result.kind ?? "xlsx",
+            }
+          : undefined,
+    };
+  }
+
   return {
     content: `Unknown tool: ${name}`,
     webSearchResult,
@@ -936,6 +979,8 @@ function summarizeToolRound(toolCalls: CloudToolCall[]): string | null {
         return "Exporting outstanding balances";
       case "tally_live_dashboard":
         return "Opening live Tally dashboard";
+      case "tally_export_excel":
+        return "Exporting Tally to Excel";
       case "render_chart":
         return "Preparing chart";
       case "generate_html":
@@ -1125,6 +1170,7 @@ export async function runCloudNativeToolLoop(
 
   const webEnabled = loopOpts.webEnabled !== false;
   const fileSearchEnabled = Boolean(loopOpts.fileSearchEnabled);
+  const privateMode = isPrivateMode();
   let gmailEnabled = false;
   try {
     gmailEnabled = Boolean((await Api.gmailStatus()).connected);
@@ -1152,14 +1198,16 @@ export async function runCloudNativeToolLoop(
   const tools = buildCloudChatTools({
     webEnabled,
     fileSearchEnabled,
-    mcpEnabled: loopOpts.includeMcpTools !== false,
-    chartEnabled: Boolean(loopOpts.chartEnabled),
+    mcpEnabled: !privateMode && loopOpts.includeMcpTools !== false,
+    chartEnabled: !privateMode && Boolean(loopOpts.chartEnabled),
     askFollowUpEnabled: true,
     gmailEnabled,
     telegramEnabled,
     driveEnabled,
     tallyEnabled,
-  });
+  }).filter(
+    (t) => !(privateMode && ARTIFACT_CREATING_TOOLS.has(t.function.name))
+  );
 
   let messages = toCloudMessages(loopOpts.messages);
   // Dynamic (non-cached) reminder so the model actually uses available tools.
@@ -1314,14 +1362,34 @@ export async function runCloudNativeToolLoop(
       }
     }
     if (hasTally) {
+      if (privateMode) {
+        parts.push(
+          "You can read TallyPrime (localhost XML HTTP, read-only): " +
+            "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding. " +
+            "Private mode is text-only — do NOT create Excel/HTML dashboards or file artifacts. " +
+            "Answer with text summaries only. Tell the user to switch to Cloud for live dashboards or Excel exports. " +
+            "Never invent balances."
+        );
+      } else {
+      const sheetPaths = (opts.attachmentSpreadsheetPaths ?? []).filter(Boolean);
+      const sheetNote = sheetPaths.length
+        ? ` Attached spreadsheet path(s) for format matching: ${sheetPaths.join(" · ")}. ` +
+          "If the user wants Tally data in that example's format, call tally_export_excel with match_template=true, " +
+          "template_path (or omit to use the first attached spreadsheet), and a full column_map " +
+          "(example header → Tally field). Never guess headers from synonyms."
+        : " If the user attaches an example Excel and asks for the same format, call tally_export_excel with match_template=true, template_path, and column_map.";
       parts.push(
         "You can read TallyPrime (localhost XML HTTP, read-only): " +
           "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding; " +
-          "tally_live_dashboard (LIVE KPIs/charts that Refresh from Tally — use this for any dashboard/visualization). " +
-          "For charts/dashboards: call tally_live_dashboard only — do NOT bake figures into generate_html. " +
-          "Use tally_* exports for Q&A about specific balances. " +
-          "The user may need to Allow once (live dashboard grants session refresh). Never invent balances."
+          "tally_live_dashboard (LIVE KPIs/charts that Refresh from Tally — use this for any dashboard/visualization); " +
+          "tally_export_excel (downloadable .xlsx with Raw/Pivot/Summary, or a sheet matching an attached example Excel). " +
+          "For a complete dashboard: call tally_live_dashboard ONCE (tabs already cover Day Book, Outstanding, Trial Balance). " +
+          "Do NOT invent multiple HTML files or claim dashboards exist unless the tool returned ok=true with a path — chips appear automatically from tool results. " +
+          "Do NOT bake figures into generate_html. Do NOT pass Tally row arrays into generate_spreadsheet — use tally_export_excel instead. " +
+          "Use tally_* exports for Q&A about specific balances. Never invent balances." +
+          sheetNote
       );
+      }
     } else {
       const lastUser = [...messages]
         .reverse()

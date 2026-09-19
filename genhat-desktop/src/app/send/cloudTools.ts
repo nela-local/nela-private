@@ -751,6 +751,102 @@ export const TALLY_LIVE_DASHBOARD_TOOL: CloudToolDefinition = {
   },
 };
 
+export const TALLY_EXPORT_EXCEL_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_export_excel",
+    description:
+      "Export Tally data to a downloadable Excel (.xlsx) workbook on the user's device. " +
+      "Prefer this for any export / Excel / spreadsheet / pivot / download request about Tally. " +
+      "Host fetches Tally and builds sheets — do NOT pass large row arrays via generate_spreadsheet. " +
+      "If the user attaches an example Excel and asks for Tally data in the same format, set match_template=true " +
+      "and template_path to that file's absolute path (or omit path to use the attached spreadsheet). " +
+      "Always pass column_map (example header → Tally field). There is no automatic header guessing. " +
+      "Use tally_live_dashboard for in-app charts; use other tally_* tools for short Q&A.",
+    parameters: {
+      type: "object",
+      properties: {
+        report: {
+          type: "string",
+          enum: ["daybook", "trial_balance", "outstanding", "ledgers"],
+          description: "Which Tally report to export.",
+        },
+        from_date: { type: "string", description: "Period start for daybook/trial_balance." },
+        to_date: { type: "string", description: "Period end for daybook/trial_balance." },
+        voucher_type: {
+          type: "string",
+          description: "Optional day-book voucher filter (Sales, Purchase, …).",
+        },
+        group: {
+          type: "string",
+          description: "Optional ledger parent group (for ledgers report).",
+        },
+        title: {
+          type: "string",
+          description: "Short workbook filename stem (not the full user prompt).",
+        },
+        match_template: {
+          type: "boolean",
+          description:
+            "Match an example Excel's column headers/layout. Set true when the user attaches a sample and wants the same format.",
+        },
+        template_path: {
+          type: "string",
+          description:
+            "Absolute path to the example .xlsx/.xls/.csv. Prefer paths listed in the system note for attached spreadsheets.",
+        },
+        template_headers: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional explicit header row if you already know the example columns (skips reading the file).",
+        },
+        column_map: {
+          type: "object",
+          description:
+            "Required when match_template is true. Map each example header to a Tally field. " +
+            "daybook: date,month,voucherType,party,amount,narration; " +
+            "trial_balance: name,debit,credit,net,parent; " +
+            "outstanding: side,name,parent,balance; " +
+            "ledgers: name,parent,closingBalance. " +
+            'Example: {"Party Name":"party","Amt":"amount"}. No automatic synonym matching.',
+          additionalProperties: { type: "string" },
+        },
+        pivot: {
+          type: "object",
+          description:
+            "Optional crosstab. Omit for defaults (skipped when matching a template unless you pass pivot). " +
+            "Fields depend on report: daybook(date,month,voucherType,party,amount); " +
+            "trial_balance(name,debit,credit,net); outstanding(side,name,parent,balance); " +
+            "ledgers(name,parent,closingBalance).",
+          properties: {
+            rows: { type: "string" },
+            columns: { type: "string", description: "Optional column dimension." },
+            values: { type: "string" },
+            aggregation: {
+              type: "string",
+              enum: ["sum", "count", "avg"],
+              description: "Default sum.",
+            },
+          },
+          required: ["rows", "values"],
+        },
+        include_raw: {
+          type: "boolean",
+          description:
+            "Include flat Raw sheet. Default true for normal exports; default false when match_template.",
+        },
+        max_rows: {
+          type: "integer",
+          description: "Export row cap (1–2000, default 2000).",
+        },
+        purpose: { type: "string" },
+      },
+      required: ["report"],
+    },
+  },
+};
+
 export function buildCloudChatTools(options?: {
   webEnabled?: boolean;
   fileSearchEnabled?: boolean;
@@ -792,7 +888,8 @@ export function buildCloudChatTools(options?: {
       TALLY_TRIAL_BALANCE_TOOL,
       TALLY_DAYBOOK_TOOL,
       TALLY_OUTSTANDING_TOOL,
-      TALLY_LIVE_DASHBOARD_TOOL
+      TALLY_LIVE_DASHBOARD_TOOL,
+      TALLY_EXPORT_EXCEL_TOOL
     );
   }
   return tools;

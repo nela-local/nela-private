@@ -21,12 +21,32 @@ import { buildSendHandlerContext } from "./buildContext";
 import { useCloudStore } from "../../stores/cloudStore";
 import { useChatModeStore } from "../../stores/chatModeStore";
 import { willRouteToCloud } from "./cloudOrLocalStream";
+import { isPrivateMode } from "../cloudPresentationMode";
+import { COPY } from "../copy";
 import {
   DASHBOARD_HTML_SCHEMA,
   DASHBOARD_HTML_TOOL,
   hasSpreadsheetAttach,
   wantsSpreadsheetDashboard,
 } from "../spreadsheetDashboardIntent";
+
+function finishPrivateModeArtifactRefusal(
+  sid: string,
+  ctx: SendHandlerContext
+): void {
+  ctx.updateSession(sid, (prev) => ({
+    loading: false,
+    streamingContent: "",
+    messages: [
+      ...prev.messages,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant" as const,
+        content: COPY.privateModeArtifactsCloudOnly,
+      },
+    ],
+  }));
+}
 
 /** Prefer store-backed send: call with text only. Optional ctx kept for tests. */
 export async function executeHandleSend(
@@ -194,6 +214,10 @@ export async function executeHandleSend(
 
   // ── Slash-command routing (explicit user intent) ─────────────────────────
   if (ctx.chatMode === "text" && slash.artifact) {
+    if (isPrivateMode()) {
+      finishPrivateModeArtifactRefusal(sid, ctx);
+      return;
+    }
     const { tool, schemaId } = slash.artifact;
     await handleArtifactGeneration(
       promptText,
@@ -236,6 +260,10 @@ export async function executeHandleSend(
         panelOpen: panelWasOpen,
       })
     ) {
+      if (isPrivateMode()) {
+        finishPrivateModeArtifactRefusal(sid, ctx);
+        return;
+      }
       await handleArtifactEdit(
         promptText,
         editTargetPath ?? "",
@@ -254,6 +282,10 @@ export async function executeHandleSend(
     };
 
     if (spreadsheetAttached && wantsSpreadsheetDashboard(promptText)) {
+      if (isPrivateMode()) {
+        finishPrivateModeArtifactRefusal(sid, ctx);
+        return;
+      }
       await handleArtifactGeneration(
         promptText,
         DASHBOARD_HTML_TOOL,
@@ -277,6 +309,10 @@ export async function executeHandleSend(
       const intent = await Api.resolveIntent(promptText, intentExtra);
       resolvedIntentKind = intent.kind.kind;
       if (intent.kind.kind === "Artifact") {
+        if (isPrivateMode()) {
+          finishPrivateModeArtifactRefusal(sid, ctx);
+          return;
+        }
         const { tool, schema_id } = intent.kind;
         await handleArtifactGeneration(
           promptText,
@@ -290,6 +326,10 @@ export async function executeHandleSend(
         return;
       }
       if (intent.kind.kind === "Patch") {
+        if (isPrivateMode()) {
+          finishPrivateModeArtifactRefusal(sid, ctx);
+          return;
+        }
         const { artifact_path } = intent.kind;
         await handleArtifactEdit(
           promptText,

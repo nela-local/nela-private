@@ -277,6 +277,14 @@ export function buildTallyLiveDashboardHtml(
     if (s == null || s === "") return NaN;
     var t = String(s).replace(/,/g, "").trim();
     var n = parseFloat(t);
+    if (Number.isFinite(n)) return n;
+    // Multi-currency Tally text: "... = -₹ 2404333.80" (₹ may show as ?)
+    var eq = t.lastIndexOf("=");
+    var focus = eq >= 0 ? t.slice(eq + 1) : t;
+    var m = focus.match(/[+-]?\\d+(?:\\.\\d+)?/);
+    if (!m) m = t.match(/[+-]?\\d+(?:\\.\\d+)?/);
+    if (!m) return NaN;
+    n = parseFloat(m[0]);
     return Number.isFinite(n) ? n : NaN;
   }
   /** Tally dates: YYYYMMDD or already ISO */
@@ -480,34 +488,47 @@ export function buildTallyLiveDashboardHtml(
   function renderTrial(payload, meta) {
     setMismatch("");
     var rows = (payload && (payload.rows || payload.ledgers)) || [];
-    var total = 0;
-    var byParent = {};
+    var debitTot = 0;
+    var creditTot = 0;
     for (var i = 0; i < rows.length; i++) {
-      var a = Math.abs(parseAmt(rows[i].closingBalance || rows[i].closing_balance));
-      if (Number.isFinite(a)) total += a;
-      var p = (rows[i].parent || "Other").trim() || "Other";
-      byParent[p] = (byParent[p] || 0) + (Number.isFinite(a) ? a : 0);
+      var d = Math.abs(parseAmt(rows[i].debit));
+      var c = Math.abs(parseAmt(rows[i].credit));
+      var closing = parseAmt(rows[i].closingBalance || rows[i].closing_balance);
+      if (Number.isFinite(d) && d > 0) debitTot += d;
+      else if (Number.isFinite(closing) && closing < 0) debitTot += Math.abs(closing);
+      if (Number.isFinite(c) && c > 0) creditTot += c;
+      else if (Number.isFinite(closing) && closing > 0 && !(Number.isFinite(d) && d > 0)) creditTot += closing;
     }
     setKpis([
-      { label: "Rows", value: String(rows.length) },
-      { label: "Abs. total", value: money(total) },
-      { label: "Groups", value: String(Object.keys(byParent).length) },
+      { label: "Accounts", value: String(rows.length) },
+      { label: "Debit (Dr)", value: money(debitTot) },
+      { label: "Credit (Cr)", value: money(creditTot) },
       { label: "Company", value: (meta && meta.company) || "—" }
     ]);
-    $("chart-mix-title").textContent = "By parent group";
-    $("chart-trend-title").textContent = "Top ledgers";
-    $("table-title").textContent = "Trial balance rows";
+    $("chart-mix-title").textContent = "Debit vs credit";
+    $("chart-trend-title").textContent = "Top accounts";
+    $("table-title").textContent = "Trial balance";
     ensureCharts();
-    var parents = Object.keys(byParent).sort(function (a, b) { return byParent[b] - byParent[a]; }).slice(0, 8);
     if (chartMix) {
       chartMix.setOption({
         tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: parents.map(function (p) { return { name: p, value: byParent[p] }; }) }]
+        series: [{ type: "pie", radius: ["35%", "65%"], data: [
+          { name: "Debit", value: debitTot || 0 },
+          { name: "Credit", value: creditTot || 0 }
+        ]}]
       }, true);
     }
     var top = rows.map(function (r) {
-      return { name: r.name, val: Math.abs(parseAmt(r.closingBalance || r.closing_balance)) };
-    }).filter(function (x) { return Number.isFinite(x.val); }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
+      var d = Math.abs(parseAmt(r.debit));
+      var c = Math.abs(parseAmt(r.credit));
+      var net = Math.abs(parseAmt(r.closingBalance || r.closing_balance));
+      var val = Math.max(
+        Number.isFinite(d) ? d : 0,
+        Number.isFinite(c) ? c : 0,
+        Number.isFinite(net) ? net : 0
+      );
+      return { name: r.name, val: val };
+    }).filter(function (x) { return Number.isFinite(x.val) && x.val > 0; }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
     if (chartTrend) {
       chartTrend.setOption({
         tooltip: { trigger: "axis" },
@@ -518,9 +539,14 @@ export function buildTallyLiveDashboardHtml(
       }, true);
     }
     setTable(
-      ["Ledger", "Parent", "Closing"],
+      ["Account", "Debit (Dr)", "Credit (Cr)", "Net"],
       rows.slice(0, 80).map(function (r) {
-        return [r.name, r.parent || "—", money(parseAmt(r.closingBalance || r.closing_balance))];
+        return [
+          r.name,
+          money(parseAmt(r.debit)),
+          money(parseAmt(r.credit)),
+          money(parseAmt(r.closingBalance || r.closing_balance))
+        ];
       })
     );
   }

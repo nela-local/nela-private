@@ -241,10 +241,63 @@ fn write_one_sheet(
                     );
                 }
             }
-            SpreadsheetOp::Pivot { .. } => {
-                warnings.push(
-                    "PIVOT: pivot tables require VBA/Excel formulas; data written as-is".to_string(),
-                );
+            SpreadsheetOp::Pivot {
+                row_col,
+                col_col,
+                value_col,
+            } => {
+                match compute_pivot_matrix(
+                    &working_headers,
+                    &working_rows,
+                    row_col,
+                    col_col,
+                    value_col,
+                ) {
+                    Ok((pivot_headers, pivot_rows)) => {
+                        let write_at = next_row;
+                        if write_at > 0 {
+                            // Leave a blank gap after the source table.
+                        }
+                        for (col_idx, header) in pivot_headers.iter().enumerate() {
+                            if let Err(e) = worksheet.write_with_format(
+                                write_at,
+                                col_idx as u16,
+                                header.as_str(),
+                                header_fmt,
+                            ) {
+                                warnings.push(format!("Write PIVOT header: {e}"));
+                            }
+                        }
+                        let mut row_cursor = write_at + 1;
+                        for row in &pivot_rows {
+                            for (col_idx, cell) in row.iter().enumerate() {
+                                if let Err(e) = write_smart_cell(
+                                    worksheet,
+                                    row_cursor,
+                                    col_idx as u16,
+                                    cell,
+                                    cell_fmt,
+                                ) {
+                                    warnings.push(e);
+                                }
+                            }
+                            row_cursor += 1;
+                        }
+                        next_row = row_cursor + 1;
+                        // If the sheet had no primary table, treat pivot as the working table.
+                        if !wrote_primary_table {
+                            working_headers = pivot_headers;
+                            working_rows = pivot_rows;
+                            col_index = working_headers
+                                .iter()
+                                .enumerate()
+                                .map(|(i, h)| (h.clone(), i))
+                                .collect();
+                            wrote_primary_table = true;
+                        }
+                    }
+                    Err(msg) => warnings.push(msg),
+                }
             }
             SpreadsheetOp::AddColumn { name, formula } => {
                 warnings.push(format!(
@@ -417,6 +470,122 @@ fn column_index(headers: &[String], name: &str) -> Option<usize> {
         .position(|h| h.trim().to_lowercase() == target)
 }
 
+fn find_header_index(headers: &[String], name: &str) -> Option<usize> {
+    let target = name.trim().to_ascii_lowercase();
+    if target.is_empty() {
+        return None;
+    }
+    headers
+        .iter()
+        .position(|h| h.trim().eq_ignore_ascii_case(&target))
+}
+
+fn cell_key(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        "(blank)".into()
+    } else {
+        t.to_string()
+    }
+}
+
+fn format_pivot_number(n: f64) -> String {
+    let rounded = (n * 100.0).round() / 100.0;
+    if (rounded - rounded.round()).abs() < f64::EPSILON {
+        format!("{}", rounded as i64)
+    } else {
+        format!("{rounded:.2}")
+    }
+}
+
+/// Pre-computed crosstab from the working table (sum aggregation).
+/// Empty `col_col` → single-dimension [row_col, sum(value_col)].
+pub fn compute_pivot_matrix(
+    headers: &[String],
+    rows: &[Vec<String>],
+    row_col: &str,
+    col_col: &str,
+    value_col: &str,
+) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+    let row_idx = find_header_index(headers, row_col)
+        .ok_or_else(|| format!("PIVOT: row column '{row_col}' not found"))?;
+    let value_idx = find_header_index(headers, value_col)
+        .ok_or_else(|| format!("PIVOT: value column '{value_col}' not found"))?;
+    let col_idx = if col_col.trim().is_empty() {
+        None
+    } else {
+        Some(
+            find_header_index(headers, col_col)
+                .ok_or_else(|| format!("PIVOT: column dimension '{col_col}' not found"))?,
+        )
+    };
+
+    let mut buckets: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    let mut row_order: Vec<String> = Vec::new();
+    let mut col_order: Vec<String> = Vec::new();
+    let mut col_seen: HashMap<String, ()> = HashMap::new();
+
+    for row in rows {
+        let rk = cell_key(row.get(row_idx).map(|s| s.as_str()).unwrap_or(""));
+        let ck = match col_idx {
+            Some(ci) => cell_key(row.get(ci).map(|s| s.as_str()).unwrap_or("")),
+            None => "_".into(),
+        };
+        if !buckets.contains_key(&rk) {
+            row_order.push(rk.clone());
+            buckets.insert(rk.clone(), HashMap::new());
+        }
+        if col_idx.is_some() && !col_seen.contains_key(&ck) {
+            col_seen.insert(ck.clone(), ());
+            col_order.push(ck.clone());
+        }
+        let n = row
+            .get(value_idx)
+            .and_then(|s| parse_number(s))
+            .unwrap_or(0.0);
+        *buckets.get_mut(&rk).unwrap().entry(ck).or_default() += n;
+    }
+
+    if col_idx.is_none() {
+        let headers_out = vec![row_col.trim().to_string(), format!("sum({value_col})")];
+        let rows_out: Vec<Vec<String>> = row_order
+            .into_iter()
+            .map(|rk| {
+                let sum = buckets
+                    .get(&rk)
+                    .and_then(|m| m.get("_"))
+                    .copied()
+                    .unwrap_or(0.0);
+                vec![rk, format_pivot_number(sum)]
+            })
+            .collect();
+        return Ok((headers_out, rows_out));
+    }
+
+    col_order.sort();
+    let mut headers_out = vec![row_col.trim().to_string()];
+    headers_out.extend(col_order.iter().cloned());
+    headers_out.push("Total".into());
+
+    let rows_out: Vec<Vec<String>> = row_order
+        .into_iter()
+        .map(|rk| {
+            let map = buckets.get(&rk).cloned().unwrap_or_default();
+            let mut total = 0.0;
+            let mut cells = Vec::with_capacity(col_order.len() + 2);
+            cells.push(rk);
+            for ck in &col_order {
+                let v = map.get(ck).copied().unwrap_or(0.0);
+                total += v;
+                cells.push(format_pivot_number(v));
+            }
+            cells.push(format_pivot_number(total));
+            cells
+        })
+        .collect();
+    Ok((headers_out, rows_out))
+}
+
 fn parse_number(s: &str) -> Option<f64> {
     let cleaned = s.trim().replace(',', "");
     cleaned.parse::<f64>().ok()
@@ -507,4 +676,54 @@ fn write_smart_cell(
         .write_with_format(row, col, cell, fmt)
         .map_err(|e| format!("Write cell: {e}"))?;
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::compute_pivot_matrix;
+
+    #[test]
+    fn pivot_two_dim_sums_party_by_month() {
+        let headers = vec![
+            "party".into(),
+            "month".into(),
+            "amount".into(),
+        ];
+        let rows = vec![
+            vec!["Acme".into(), "2024-01".into(), "100".into()],
+            vec!["Acme".into(), "2024-01".into(), "50".into()],
+            vec!["Acme".into(), "2024-02".into(), "25".into()],
+            vec!["Beta".into(), "2024-01".into(), "10".into()],
+        ];
+        let (hout, rout) =
+            compute_pivot_matrix(&headers, &rows, "party", "month", "amount").unwrap();
+        assert_eq!(hout, vec!["party", "2024-01", "2024-02", "Total"]);
+        assert_eq!(rout.len(), 2);
+        assert_eq!(rout[0], vec!["Acme", "150", "25", "175"]);
+        assert_eq!(rout[1], vec!["Beta", "10", "0", "10"]);
+    }
+
+    #[test]
+    fn pivot_single_dim_when_col_empty() {
+        let headers = vec!["name".into(), "net".into()];
+        let rows = vec![
+            vec!["Cash".into(), "100".into()],
+            vec!["Cash".into(), "40".into()],
+            vec!["Bank".into(), "-10".into()],
+        ];
+        let (hout, rout) = compute_pivot_matrix(&headers, &rows, "name", "", "net").unwrap();
+        assert_eq!(hout[0], "name");
+        assert!(hout[1].contains("sum"));
+        assert_eq!(rout[0], vec!["Cash", "140"]);
+        assert_eq!(rout[1], vec!["Bank", "-10"]);
+    }
+
+    #[test]
+    fn pivot_errors_on_missing_column() {
+        let headers = vec!["a".into(), "b".into()];
+        let rows = vec![vec!["1".into(), "2".into()]];
+        let err = compute_pivot_matrix(&headers, &rows, "missing", "", "b").unwrap_err();
+        assert!(err.contains("row column"));
+    }
 }

@@ -28,5 +28,6 @@ describe("tally tools gating", () => {
     assert.equal(on.some((t) => t.function.name === "tally_daybook"), true);
     assert.equal(on.some((t) => t.function.name === "tally_outstanding"), true);
     assert.equal(on.some((t) => t.function.name === "tally_live_dashboard"), true);
+    assert.equal(on.some((t) => t.function.name === "tally_export_excel"), true);
   });
 });

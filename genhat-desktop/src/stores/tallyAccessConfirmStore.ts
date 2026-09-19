@@ -5,7 +5,8 @@ export type TallyAccessKind =
   | "trial_balance"
   | "daybook"
   | "outstanding"
-  | "live_dashboard";
+  | "live_dashboard"
+  | "export_excel";
 
 export type TallyAccessRequest = {
   kind: TallyAccessKind;

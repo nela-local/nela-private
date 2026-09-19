@@ -1608,6 +1608,8 @@ export const Api = {
       name: string;
       parent?: string | null;
       closingBalance?: string | null;
+      debit?: string | null;
+      credit?: string | null;
     }>;
     truncated: boolean;
     error?: string | null;
@@ -1631,6 +1633,8 @@ export const Api = {
       name: string;
       parent?: string | null;
       closingBalance?: string | null;
+      debit?: string | null;
+      credit?: string | null;
     }>;
     truncated: boolean;
     error?: string | null;
@@ -1680,6 +1684,8 @@ export const Api = {
         name: string;
         parent?: string | null;
         closingBalance?: string | null;
+        debit?: string | null;
+        credit?: string | null;
       }>;
     };
     payables: {
@@ -1689,6 +1695,8 @@ export const Api = {
         name: string;
         parent?: string | null;
         closingBalance?: string | null;
+        debit?: string | null;
+        credit?: string | null;
       }>;
     };
     error?: string | null;

@@ -51,3 +51,17 @@ export function canAutoStreamArtifacts(): boolean {
     ? Boolean(entitlement.paidCloud || preferredMode === "auto")
     : false;
 }
+
+/** Private (preferredMode local): text answers only — no file artifact generation. */
+export function isPrivateMode(): boolean {
+  return useCloudStore.getState().preferredMode === "local";
+}
+
+/** Tool names that create downloadable / previewable file artifacts. */
+export const ARTIFACT_CREATING_TOOLS = new Set([
+  "generate_spreadsheet",
+  "generate_presentation",
+  "generate_html",
+  "tally_live_dashboard",
+  "tally_export_excel",
+]);

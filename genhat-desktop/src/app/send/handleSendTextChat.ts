@@ -16,7 +16,8 @@ import {
 } from "../nelaSystemPrompt";
 import { CHART_SYSTEM_INSTRUCTION } from "../../prompts/chartPrompt";
 import { NELA_AUTO_ARTIFACT_CRITERIA } from "../autoArtifactPrompt";
-import { canAutoStreamArtifacts } from "../cloudPresentationMode";
+import { canAutoStreamArtifacts, isPrivateMode } from "../cloudPresentationMode";
+import { COPY } from "../copy";
 import {
   defaultArtifactFollowup,
   defaultArtifactIntro,
@@ -55,12 +56,14 @@ import { useChatModeStore } from "../../stores/chatModeStore";
 import { useArtifactStreamStore } from "../../stores/artifactStreamStore";
 import {
   DIRECT_ATTACHMENT_SYSTEM,
+  collectAttachmentPaths,
   fileSearchEnabledForTurn,
   hasExplicitAttachments,
   overlayCloudAttachments,
   pluginForPrepared,
   prepareMessageAttachments,
 } from "./directAttachments";
+import { isSpreadsheetPath } from "./tallyTemplateFormat";
 import type { CloudChatMessage, CloudFileParserPlugin, FileAnnotation } from "../../types";
 
 export async function handleSendTextChat(
@@ -166,14 +169,18 @@ export async function handleSendTextChat(
       ? NELA_CLOUD_SYSTEM_PROMPT
       : NELA_SYSTEM_PROMPT;
   const autoArtifacts = canAutoStreamArtifacts();
+  const privateMode = isPrivateMode();
   // Date line lives after the identity block so the cached cloud prefix stays byte-stable.
   const dateLine = currentDateSystemLine();
+  const privateTextOnly = privateMode
+    ? `\n\nPrivate mode is text-only. Do not create or propose file artifacts (HTML, PPT, Excel, dashboards). Answer in plain text. If the user wants a file artifact, tell them: ${COPY.privateModeArtifactsCloudOnly}`
+    : "";
   let apiMessages = [
     {
       role: "system" as const,
       content: autoArtifacts
         ? `${identityPrompt}\n\n${dateLine}\n\n${NELA_AUTO_ARTIFACT_CRITERIA}\n\n${CHART_SYSTEM_INSTRUCTION}`
-        : `${identityPrompt}\n\n${dateLine}\n\n${CHART_SYSTEM_INSTRUCTION}`,
+        : `${identityPrompt}\n\n${dateLine}${privateTextOnly}\n\n${CHART_SYSTEM_INSTRUCTION}`,
     },
     ...(explicitAttachments
       ? [{ role: "system" as const, content: DIRECT_ATTACHMENT_SYSTEM }]
@@ -364,7 +371,8 @@ export async function handleSendTextChat(
     web: WebSearchResult | null,
     generatedByModel?: string | null,
     creditsRemainingAfter?: number | null,
-    fileAnnotations?: FileAnnotation[] | null
+    fileAnnotations?: FileAnnotation[] | null,
+    toolArtifacts?: { path: string; kind?: string; title?: string }[] | null
   ) => {
     chunkFlusher.flushNow();
     thinkingFlusher.flushNow();
@@ -390,6 +398,28 @@ export async function handleSendTextChat(
     let artifactSaveFailure: string | null = null;
     /** Preview works; disk save skipped or soft — keep success UX (intro + chip). */
     let previewSoftSuccess = false;
+
+    const toolArtifactRefs = (toolArtifacts ?? [])
+      .filter((a) => typeof a.path === "string" && a.path.trim())
+      .map((a) => {
+        const path = a.path.trim();
+        const fromName =
+          path.split(/[/\\]/).pop()?.replace(/\.(html?|xlsx|csv|docx?)$/i, "") ||
+          "Artifact";
+        return {
+          path,
+          kind: a.kind,
+          title: (a.title && a.title.trim()) || fromName.replace(/[-_]+/g, " "),
+        };
+      });
+    // Dedupe by path, keep order (last wins for title).
+    const toolArtsByPath = new Map<string, (typeof toolArtifactRefs)[number]>();
+    for (const a of toolArtifactRefs) toolArtsByPath.set(a.path, a);
+    const uniqueToolArts = [...toolArtsByPath.values()];
+    if (uniqueToolArts.length > 0) {
+      artifactPath = uniqueToolArts[uniqueToolArts.length - 1]!.path;
+      artifactStage = "LivePreview";
+    }
     const body =
       streamedArtifactType === "text/csv"
         ? rawModelOutput.trim() || streamedArtifactBody.trim()
@@ -468,6 +498,9 @@ export async function handleSendTextChat(
 
     const title =
       streamedArtifactTitle ||
+      (uniqueToolArts.length
+        ? uniqueToolArts[uniqueToolArts.length - 1]!.title
+        : undefined) ||
       (artifactPath
         ? artifactPath.split(/[/\\]/).pop()?.replace(/\.(html?|xlsx|csv|docx?)$/i, "")
         : undefined) ||
@@ -529,7 +562,7 @@ export async function handleSendTextChat(
         });
       }
 
-      if (!intro && !followup && !artifactPath && !body) {
+      if (!intro && !followup && !artifactPath && !body && uniqueToolArts.length === 0) {
         return {
           streamingContent: "",
           loading: false,
@@ -545,6 +578,21 @@ export async function handleSendTextChat(
         | "LivePreview"
         | "Error"
         | undefined;
+
+      // Merge streamed save + tool artifacts for chips (e.g. 3 live dashboards).
+      const messageArtifacts = [...uniqueToolArts];
+      if (
+        artifactPath &&
+        !messageArtifacts.some((a) => a.path === artifactPath)
+      ) {
+        messageArtifacts.push({
+          path: artifactPath,
+          title: title || filename || "Artifact",
+          kind: streamedArtifactType === "text/csv" ? "xlsx" : "html",
+        });
+      }
+      const hasArtifact = Boolean(artifactPath) || messageArtifacts.length > 0;
+
       return {
         messages: [
           ...prev.messages,
@@ -567,13 +615,24 @@ export async function handleSendTextChat(
             generateTime: totalTime,
             firstTokenTime:
               timeToFirstToken !== null ? timeToFirstToken : undefined,
-            ...(artifactPath || body
+            ...(hasArtifact || body
               ? {
-                  artifactPath: artifactPath ?? undefined,
-                  artifactStage: resolvedStage,
+                  artifactPath: artifactPath ?? messageArtifacts[0]?.path,
+                  artifactStage: resolvedStage ?? "LivePreview",
                   artifactUseSidePanel: true,
-                  artifactTitle: title || filename || "Artifact",
-                  streamingArtifactType: streamedArtifactType,
+                  artifactTitle:
+                    title ||
+                    messageArtifacts[messageArtifacts.length - 1]?.title ||
+                    filename ||
+                    "Artifact",
+                  streamingArtifactType:
+                    streamedArtifactType ||
+                    (artifactPath && /\.xlsx?$/i.test(artifactPath)
+                      ? "text/csv"
+                      : "text/html"),
+                  ...(messageArtifacts.length > 0
+                    ? { artifacts: messageArtifacts }
+                    : {}),
                 }
               : {}),
           },
@@ -582,7 +641,8 @@ export async function handleSendTextChat(
         loading: false,
         artifactPath: artifactPath ?? prev.artifactPath,
         artifactStage: resolvedStage ?? prev.artifactStage,
-        artifactPanelOpen: body ? true : prev.artifactPanelOpen,
+        artifactPanelOpen:
+          hasArtifact || body ? true : prev.artifactPanelOpen,
         artifactStreamActive: Boolean(body),
         streamingArtifactCsv: undefined,
         ...(body && streamedArtifactType === "text/html"
@@ -591,7 +651,11 @@ export async function handleSendTextChat(
         ...(body && streamedArtifactType === "text/csv"
           ? { streamingArtifactCsv: streamedArtifactBody }
           : {}),
-        streamingArtifactType: body ? streamedArtifactType : undefined,
+        streamingArtifactType: body
+          ? streamedArtifactType
+          : hasArtifact
+            ? "text/html"
+            : undefined,
         streamingArtifactTitle: title || filename || undefined,
       };
     });
@@ -697,8 +761,10 @@ export async function handleSendTextChat(
       webDepth: "full",
       webEnabled: effectiveWebEnabled,
       fileSearchEnabled,
-      includeMcpTools: !autoArtifacts || Boolean(tallyIntent && connectorToolsNeeded),
-      chartEnabled: true,
+      includeMcpTools:
+        !privateMode &&
+        (!autoArtifacts || Boolean(tallyIntent && connectorToolsNeeded)),
+      chartEnabled: !privateMode,
       chartPool,
       containsFileContext: explicitAttachments,
       userConfirmedCloudContext: cloudConfirmed,
@@ -708,6 +774,10 @@ export async function handleSendTextChat(
       signal: ctrl.signal,
       disableThinking: !ctx.thinkingEnabled,
       generationOptions,
+      attachmentSpreadsheetPaths: collectAttachmentPaths([
+        ...session.messages,
+        newMsg,
+      ]).filter(isSpreadsheetPath),
       onChunk,
       onThinking,
       onToolStatus: (status) => {
@@ -728,6 +798,14 @@ export async function handleSendTextChat(
         ctx.updateSession(sid, () => ({
           artifactPath: artifact.path,
           artifactStage: "LivePreview",
+          artifactPanelOpen: true,
+          streamingArtifactType: "text/html",
+          streamingArtifactTitle:
+            artifact.path
+              .split(/[/\\]/)
+              .pop()
+              ?.replace(/\.(html?|xlsx|csv)$/i, "")
+              ?.replace(/[-_]+/g, " ") || "Dashboard",
         }));
       },
     })
@@ -736,10 +814,21 @@ export async function handleSendTextChat(
         if (result.thinking && !fullThinking) {
           fullThinking = result.thinking;
         }
-        if (result.artifacts[0]) {
+        const toolArts = (result.artifacts ?? []).map((a) => ({
+          path: a.path,
+          kind: a.kind,
+          title:
+            a.path
+              .split(/[/\\]/)
+              .pop()
+              ?.replace(/\.(html?|xlsx|csv)$/i, "")
+              ?.replace(/[-_]+/g, " ") || undefined,
+        }));
+        if (toolArts[0]) {
           ctx.updateSession(sid, () => ({
-            artifactPath: result.artifacts[0]!.path,
+            artifactPath: toolArts[toolArts.length - 1]!.path,
             artifactStage: "LivePreview",
+            artifactPanelOpen: true,
           }));
         }
         void finishOk(
@@ -748,7 +837,8 @@ export async function handleSendTextChat(
           webSearchResult,
           result.model,
           result.creditsRemaining,
-          result.fileAnnotations
+          result.fileAnnotations,
+          toolArts
         );
       })
       .catch((err) => {

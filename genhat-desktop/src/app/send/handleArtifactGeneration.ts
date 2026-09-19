@@ -58,7 +58,8 @@ import {
   mapHtmlRendererTheme,
 } from "../htmlArtifactPrompt";
 import { buildPresentationSystemParts } from "../presentationPlanPrompt";
-import { resolveCloudArtifactMode } from "../cloudPresentationMode";
+import { resolveCloudArtifactMode, isPrivateMode } from "../cloudPresentationMode";
+import { COPY } from "../copy";
 import {
   parsePresentationHtmlArtifactOutput,
   looksLikeHtmlPageJsonPlan,
@@ -131,6 +132,22 @@ export async function handleArtifactGeneration(
     attachedPaths?: string[];
   }
 ): Promise<void> {
+  if (isPrivateMode()) {
+    ctx.updateSession(sid, (prev) => ({
+      loading: false,
+      streamingContent: "",
+      messages: [
+        ...prev.messages,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: COPY.privateModeArtifactsCloudOnly,
+        },
+      ],
+    }));
+    return;
+  }
+
   const preferredModeEarly = useCloudStore.getState().preferredMode;
   const earlyUseCloud = willRouteToCloud({
     containsFileContext: false,

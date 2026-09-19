@@ -29,7 +29,9 @@ export default function TallyAccessConfirmCard() {
           ? "Day book"
           : request.kind === "live_dashboard"
             ? "Live dashboard (ongoing refresh)"
-            : "Outstanding (debtors/creditors)";
+            : request.kind === "export_excel"
+              ? "Excel export"
+              : "Outstanding (debtors/creditors)";
 
   const details: string[] = [];
   if (request.group) details.push(`Group: ${request.group}`);

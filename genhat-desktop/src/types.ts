@@ -34,6 +34,12 @@ export interface WorkspaceOpenResult {
   frontend_state_json: string | null;
 }
 
+export interface ChatMessageArtifactRef {
+  path: string;
+  title?: string;
+  kind?: string;
+}
+
 export interface ChatMessage {
   /** Stable id for list keys / memoization (assigned on create or normalize). */
   id?: string;
@@ -68,6 +74,11 @@ export interface ChatMessage {
   artifactUseSidePanel?: boolean;
   /** Title shown on the artifact chip / panel. */
   artifactTitle?: string;
+  /**
+   * Extra artifacts from the same turn (e.g. multiple tally_live_dashboard calls).
+   * First entry should match artifactPath when both are set.
+   */
+  artifacts?: ChatMessageArtifactRef[];
   /** Follow-up prose shown after the artifact chip (Claude-style). */
   artifactFollowup?: string;
   streamingArtifactHtml?: string;

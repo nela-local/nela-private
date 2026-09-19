@@ -397,8 +397,23 @@ function ChatMessageItemInner({
                                       hasLiveStreamBody &&
                                       isLast))
                               );
+                              const artifactChips =
+                                msg.artifacts && msg.artifacts.length > 0
+                                  ? msg.artifacts
+                                  : msg.artifactPath
+                                    ? [
+                                        {
+                                          path: msg.artifactPath,
+                                          title: chipTitle,
+                                          kind:
+                                            chipType === "text/csv"
+                                              ? "xlsx"
+                                              : "html",
+                                        },
+                                      ]
+                                    : [];
                               const showChip =
-                                Boolean(msg.artifactPath) ||
+                                artifactChips.length > 0 ||
                                 (isLast && hasLiveStreamBody) ||
                                 stage === "LivePreview" ||
                                 stage === "WritingCode" ||
@@ -444,49 +459,100 @@ function ChatMessageItemInner({
                                       )}
                                     </div>
                                   )}
-                                  {showChip && (
-                                    <ArtifactChip
-                                      title={chipTitle}
-                                      type={chipType}
-                                      path={msg.artifactPath}
-                                      panelOpen={panelOpen}
-                                      loading={generating || (!msg.artifactPath && !hasLiveStreamBody)}
-                                      onTogglePanel={() => {
-                                        if (!sessionId) return;
-                                        const path = msg.artifactPath;
-                                        if (!path) {
-                                          updateSession(sessionId, {
-                                            artifactPanelOpen: !panelOpen,
-                                            artifactStreamActive: true,
-                                          });
-                                          return;
-                                        }
-                                        if (panelOpen) {
-                                          updateSession(sessionId, {
-                                            artifactPanelOpen: false,
-                                          });
-                                          return;
-                                        }
-                                        const inferredType: "text/html" | "text/csv" =
-                                          msg.streamingArtifactType ||
-                                          (/\.xlsx?$/i.test(path)
+                                  {showChip &&
+                                    (artifactChips.length > 0 ? (
+                                      artifactChips.map((art) => {
+                                        const artOpen = Boolean(
+                                          sessionArtifactPanelOpen === true &&
+                                            sessionArtifactPath === art.path
+                                        );
+                                        const artTitle =
+                                          art.title ||
+                                          art.path
+                                            .split(/[/\\]/)
+                                            .pop()
+                                            ?.replace(/\.(html?|xlsx|csv)$/i, "") ||
+                                          "Artifact";
+                                        const artType: "text/html" | "text/csv" =
+                                          /\.xlsx?$/i.test(art.path) ||
+                                          art.kind === "xlsx" ||
+                                          art.kind === "csv"
                                             ? "text/csv"
-                                            : "text/html");
-                                        updateSession(sessionId, {
-                                          artifactPanelOpen: true,
-                                          artifactStreamActive: true,
-                                          artifactPath: path,
-                                          artifactStage: "LivePreview",
-                                          // Clear any other artifact's streamed body so the
-                                          // panel reloads this message's file from disk.
-                                          streamingArtifactHtml: undefined,
-                                          streamingArtifactCsv: undefined,
-                                          streamingArtifactType: inferredType,
-                                          streamingArtifactTitle: chipTitle,
-                                        });
-                                      }}
-                                    />
-                                  )}
+                                            : "text/html";
+                                        return (
+                                          <ArtifactChip
+                                            key={art.path}
+                                            title={artTitle}
+                                            type={artType}
+                                            path={art.path}
+                                            panelOpen={artOpen}
+                                            loading={false}
+                                            onTogglePanel={() => {
+                                              if (!sessionId) return;
+                                              if (artOpen) {
+                                                updateSession(sessionId, {
+                                                  artifactPanelOpen: false,
+                                                });
+                                                return;
+                                              }
+                                              updateSession(sessionId, {
+                                                artifactPanelOpen: true,
+                                                artifactStreamActive: true,
+                                                artifactPath: art.path,
+                                                artifactStage: "LivePreview",
+                                                streamingArtifactHtml: undefined,
+                                                streamingArtifactCsv: undefined,
+                                                streamingArtifactType: artType,
+                                                streamingArtifactTitle: artTitle,
+                                              });
+                                            }}
+                                          />
+                                        );
+                                      })
+                                    ) : (
+                                      <ArtifactChip
+                                        title={chipTitle}
+                                        type={chipType}
+                                        path={msg.artifactPath}
+                                        panelOpen={panelOpen}
+                                        loading={
+                                          generating ||
+                                          (!msg.artifactPath && !hasLiveStreamBody)
+                                        }
+                                        onTogglePanel={() => {
+                                          if (!sessionId) return;
+                                          const path = msg.artifactPath;
+                                          if (!path) {
+                                            updateSession(sessionId, {
+                                              artifactPanelOpen: !panelOpen,
+                                              artifactStreamActive: true,
+                                            });
+                                            return;
+                                          }
+                                          if (panelOpen) {
+                                            updateSession(sessionId, {
+                                              artifactPanelOpen: false,
+                                            });
+                                            return;
+                                          }
+                                          const inferredType: "text/html" | "text/csv" =
+                                            msg.streamingArtifactType ||
+                                            (/\.xlsx?$/i.test(path)
+                                              ? "text/csv"
+                                              : "text/html");
+                                          updateSession(sessionId, {
+                                            artifactPanelOpen: true,
+                                            artifactStreamActive: true,
+                                            artifactPath: path,
+                                            artifactStage: "LivePreview",
+                                            streamingArtifactHtml: undefined,
+                                            streamingArtifactCsv: undefined,
+                                            streamingArtifactType: inferredType,
+                                            streamingArtifactTitle: chipTitle,
+                                          });
+                                        }}
+                                      />
+                                    ))}
                                   {msg.artifactFollowup?.trim() && (
                                       <div className="mt-3">
                                         <MarkdownRenderer

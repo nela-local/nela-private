@@ -88,6 +88,24 @@ function normalizeMessage(raw: ChatMessage): ChatMessage {
       typeof raw.artifactTitle === "string" && raw.artifactTitle
         ? raw.artifactTitle
         : undefined,
+    artifacts: Array.isArray(raw.artifacts)
+      ? raw.artifacts
+          .filter(
+            (a): a is { path: string; title?: string; kind?: string } =>
+              !!a && typeof a.path === "string" && Boolean(a.path.trim())
+          )
+          .map((a) => ({
+            path: a.path.trim(),
+            title:
+              typeof a.title === "string" && a.title.trim()
+                ? a.title.trim()
+                : undefined,
+            kind:
+              typeof a.kind === "string" && a.kind.trim()
+                ? a.kind.trim()
+                : undefined,
+          }))
+      : undefined,
     artifactFollowup:
       typeof raw.artifactFollowup === "string" && raw.artifactFollowup.trim()
         ? raw.artifactFollowup

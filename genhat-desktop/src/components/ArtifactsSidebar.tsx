@@ -130,12 +130,17 @@ export default function ArtifactsSidebar() {
 
       for (let i = 0; i < session.messages.length; i += 1) {
         const msg = session.messages[i]!;
-        if (msg.role !== "assistant" || !msg.artifactPath?.trim()) continue;
-        push(
-          msg.artifactPath,
-          msg.artifactTitle,
-          precedingUserPrompt(session.messages, i)
-        );
+        if (msg.role !== "assistant") continue;
+        const prompt = precedingUserPrompt(session.messages, i);
+        const refs =
+          msg.artifacts && msg.artifacts.length > 0
+            ? msg.artifacts
+            : msg.artifactPath
+              ? [{ path: msg.artifactPath, title: msg.artifactTitle }]
+              : [];
+        for (const ref of refs) {
+          push(ref.path, ref.title || msg.artifactTitle, prompt);
+        }
       }
 
       // Session-level path only if not already covered by a message.

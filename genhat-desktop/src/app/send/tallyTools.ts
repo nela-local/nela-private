@@ -11,6 +11,10 @@ import {
   openTallyAccessConfirm,
   type TallyAccessKind,
 } from "../../stores/tallyAccessConfirmStore";
+import {
+  buildTallyExcelWorkbook,
+  parseTallyExportArgs,
+} from "./tallyExcelExport";
 
 function clampMax(raw: unknown, fallback: number, hardMax: number): number {
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -283,4 +287,121 @@ export async function executeTallyLiveDashboard(
       reason: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+export async function executeTallyExportExcel(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+    onArtifact?: (artifact: {
+      path: string;
+      kind: string;
+      warning?: string;
+    }) => void;
+    /** Attached spreadsheet paths from this turn (fallback for template_path). */
+    attachmentSpreadsheetPaths?: string[];
+  }
+): Promise<
+  | {
+      ok: true;
+      path: string;
+      kind: string;
+      report: string;
+      rowCount: number;
+      truncated: boolean;
+      company: string | null;
+      pivot: unknown;
+      templateMatched?: boolean;
+      templateMapping?: string[];
+    }
+  | { ok: false; reason: string }
+> {
+  const parsed = parseTallyExportArgs(args);
+  if (!parsed.ok) {
+    return { ok: false, reason: parsed.error };
+  }
+  const exportArgs = parsed.value;
+  // If user asked to match format but omitted path, use first attached spreadsheet.
+  if (
+    exportArgs.matchTemplate &&
+    !exportArgs.templatePath &&
+    !exportArgs.templateHeaders?.length &&
+    options?.attachmentSpreadsheetPaths?.length
+  ) {
+    exportArgs.templatePath = options.attachmentSpreadsheetPaths[0] ?? null;
+  }
+  const purpose = purposeOf(
+    args,
+    exportArgs.matchTemplate
+      ? `Export Tally ${exportArgs.report.replace(/_/g, " ")} matching example Excel format`
+      : `Export Tally ${exportArgs.report.replace(/_/g, " ")} to Excel`
+  );
+
+  const confirmed = await withConfirm(
+    "export_excel",
+    {
+      purpose,
+      group: exportArgs.group,
+      fromDate: exportArgs.fromDate,
+      toDate: exportArgs.toDate,
+      voucherType: exportArgs.voucherType,
+      maxRows: exportArgs.maxRows,
+    },
+    async () => {
+      options?.onStatus?.(
+        exportArgs.matchTemplate
+          ? "Matching example Excel format from Tally…"
+          : "Building Excel workbook from Tally…"
+      );
+      const built = await buildTallyExcelWorkbook(exportArgs, {
+        fallbackTemplatePaths: options?.attachmentSpreadsheetPaths,
+      });
+      if (!built.ok) {
+        return { ok: false as const, reason: built.error };
+      }
+      const artifact = await Api.generateSpreadsheet({
+        ops: [],
+        sheets: built.sheets,
+        output_name: built.title,
+      });
+      options?.onArtifact?.(artifact);
+      return {
+        ok: true as const,
+        path: artifact.path,
+        kind: artifact.kind ?? "xlsx",
+        report: built.report,
+        rowCount: built.rowCount,
+        truncated: built.truncated,
+        company: built.company,
+        pivot: built.pivotApplied,
+        templateMatched: built.templateMatched,
+        templateMapping: built.templateMappingNotes,
+      };
+    },
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow Tally Excel export…",
+      runningLabel: "Exporting Tally data to Excel…",
+    }
+  );
+
+  if (
+    confirmed &&
+    typeof confirmed === "object" &&
+    "ok" in confirmed &&
+    confirmed.ok === false &&
+    "reason" in confirmed
+  ) {
+    return { ok: false, reason: String(confirmed.reason) };
+  }
+  if (
+    confirmed &&
+    typeof confirmed === "object" &&
+    "ok" in confirmed &&
+    confirmed.ok === true
+  ) {
+    return confirmed;
+  }
+  return { ok: false, reason: "Tally Excel export failed." };
 }
