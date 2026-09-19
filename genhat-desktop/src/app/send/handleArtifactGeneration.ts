@@ -64,6 +64,7 @@ import {
   parsePresentationHtmlArtifactOutput,
   looksLikeHtmlPageJsonPlan,
   looksLikePresentationJsonPlan,
+  isPreviewableHtmlDocument,
 } from "../artifactHtmlOutput";
 import {
   localArtifactGroundingPreamble,
@@ -89,8 +90,6 @@ import {
   classifyArtifactFailure,
   friendlyErrorFromUnknown,
 } from "../friendlyError";
-import { COPY } from "../copy";
-import { isPreviewableHtmlDocument } from "../artifactHtmlOutput";
 import { saveStreamedArtifact } from "../streamArtifactSave";
 import { completeTruncatedPresentationHtml } from "../presentationHtmlCompleteness";
 import {

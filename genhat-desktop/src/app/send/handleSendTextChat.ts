@@ -24,7 +24,6 @@ import {
   failedArtifactSaveFollowup,
   previewReadySoftFollowup,
 } from "../artifactChatCopy";
-import { COPY } from "../copy";
 import {
   classifyArtifactFailure,
   friendlyErrorFromUnknown,
