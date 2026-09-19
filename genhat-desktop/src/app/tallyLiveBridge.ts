@@ -9,7 +9,12 @@ import {
   type TallyLiveRequestMessage,
   type TallyLiveResponseMessage,
   type TallyLiveRequestKind,
+  type TallyLiveFocus,
 } from "./tallyLiveDashboard";
+import {
+  isTallyLiveSelectionMessage,
+  setTallyLiveSelection,
+} from "./tallyLiveSelection";
 
 function isTallyLiveRequest(data: unknown): data is TallyLiveRequestMessage {
   if (!data || typeof data !== "object") return false;
@@ -62,6 +67,19 @@ export async function handleTallyLiveRequest(
   const kind = data.kind as TallyLiveRequestKind;
   let meta: TallyLiveResponseMessage["meta"];
 
+  // Remember the period the live preview is actually querying.
+  const focusFromKind =
+    kind === "daybook" || kind === "outstanding" || kind === "trial_balance"
+      ? (kind as TallyLiveFocus)
+      : undefined;
+  if (data.fromDate != null || data.toDate != null || focusFromKind) {
+    setTallyLiveSelection({
+      fromDate: data.fromDate,
+      toDate: data.toDate,
+      focus: focusFromKind,
+    });
+  }
+
   try {
     const status = await Api.tallyStatus();
     meta = {
@@ -70,6 +88,9 @@ export async function handleTallyLiveRequest(
       company: status.company ?? null,
       connected: Boolean(status.connected),
     };
+    if (status.company) {
+      setTallyLiveSelection({ company: status.company });
+    }
 
     if (kind === "status") {
       if (!status.connected) {
@@ -154,6 +175,15 @@ export function attachTallyLiveBridge(
   getTargetWindow: () => Window | null | undefined
 ): () => void {
   const onMessage = (ev: MessageEvent) => {
+    if (isTallyLiveSelectionMessage(ev.data)) {
+      setTallyLiveSelection({
+        fromDate: ev.data.fromDate,
+        toDate: ev.data.toDate,
+        focus: ev.data.focus,
+        company: ev.data.company,
+      });
+      return;
+    }
     void (async () => {
       const response = await handleTallyLiveRequest(ev.data);
       if (!response) return;

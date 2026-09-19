@@ -10,6 +10,7 @@ import type { DeckExportFormat } from "../app/exportDeck";
 import { prepareArtifactHtmlPreview } from "../app/artifactHtmlPreview";
 import { isPresentationPreviewHtml } from "../app/presentationPreviewSelect";
 import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
+import { readTallyLiveSelectionFromWindow } from "../app/tallyLiveSelection";
 
 export interface InlineArtifactProps {
   artifactPath?: string | null;
@@ -238,10 +239,14 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
       setExportError(null);
       setExporting(kind);
       try {
+        const tallySelection = readTallyLiveSelectionFromWindow(
+          iframeRef.current?.contentWindow
+        );
+        const opts = tallySelection ? { tallySelection } : undefined;
         if (kind === "html" || kind === "copy") {
-          await downloadArtifactCopy(currentPath);
+          await downloadArtifactCopy(currentPath, opts);
         } else if (kind === "docx") {
-          await exportArtifactDocx(currentPath);
+          await exportArtifactDocx(currentPath, opts);
         } else {
           await exportArtifactDeck(currentPath, kind);
         }

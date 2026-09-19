@@ -1,54 +1,34 @@
 /**
- * Host-owned Live Tally Dashboard HTML shell.
- * Fetches data via postMessage → NELA parent (not direct localhost CORS).
+ * Static (baked) Tally dashboard HTML for download/export.
+ * Values are embedded at export time — no NELA bridge or live Tally connector.
  */
 
-export type TallyLiveFocus = "daybook" | "outstanding" | "trial_balance";
+import { Api } from "../api";
+import { grantTallySessionTrust } from "../stores/tallyAccessConfirmStore";
+import { toInputDate, type TallyLiveFocus } from "./tallyLiveDashboard";
 
-export type TallyLiveDashboardOptions = {
-  title?: string;
-  fromDate?: string | null;
-  toDate?: string | null;
-  focus?: TallyLiveFocus;
-  companyHint?: string | null;
-  hostHint?: string | null;
-  portHint?: number | null;
+export type TallyStaticMeta = {
+  title: string;
+  fromDate: string;
+  toDate: string;
+  focus: TallyLiveFocus;
 };
 
-export const NELA_TALLY_REQUEST = "nela-tally-request";
-export const NELA_TALLY_RESPONSE = "nela-tally-response";
-export const NELA_TALLY_SELECTION = "nela-tally-selection";
-
-export type TallyLiveRequestKind =
-  | "status"
-  | "daybook"
-  | "outstanding"
-  | "trial_balance"
-  | "list_ledgers";
-
-export type TallyLiveRequestMessage = {
-  type: typeof NELA_TALLY_REQUEST;
-  id: string;
-  kind: TallyLiveRequestKind;
-  fromDate?: string | null;
-  toDate?: string | null;
-  maxRows?: number;
+export type TallySnapshotTabError = {
+  error: string;
 };
 
-export type TallyLiveResponseMessage = {
-  type: typeof NELA_TALLY_RESPONSE;
-  id: string;
-  ok: boolean;
-  kind: TallyLiveRequestKind;
-  error?: string | null;
-  needsAllow?: boolean;
-  data?: unknown;
-  meta?: {
-    host?: string | null;
-    port?: number | null;
-    company?: string | null;
-    connected?: boolean;
-  };
+export type TallyDashboardSnapshot = {
+  company: string | null;
+  host: string | null;
+  port: number | null;
+  exportedAt: string;
+  fromDate: string;
+  toDate: string;
+  focus: TallyLiveFocus;
+  daybook: unknown | TallySnapshotTabError;
+  outstanding: unknown | TallySnapshotTabError;
+  trial_balance: unknown | TallySnapshotTabError;
 };
 
 function esc(s: string): string {
@@ -59,42 +39,165 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** YYYYMMDD or YYYY-MM-DD → YYYY-MM-DD for <input type="date"> */
-export function toInputDate(raw: string | null | undefined): string {
-  if (!raw?.trim()) return "";
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length === 8) {
-    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
-  return "";
+/** True when HTML is a live Tally dashboard shell (needs NELA bridge). */
+export function isLiveTallyDashboardHtml(html: string): boolean {
+  return /data-nela-tally-live\s*=\s*["']?1["']?/i.test(html.slice(0, 8000));
 }
 
-/** Default: last 30 days ending today (UTC date parts). */
-function defaultDateRange(): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 30);
-  const fmt = (d: Date) =>
-    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  return { from: fmt(from), to: fmt(to) };
+function attrValue(html: string, attr: string): string {
+  const re = new RegExp(`${attr}\\s*=\\s*["']([^"']*)["']`, "i");
+  const m = html.match(re);
+  return m?.[1]?.trim() ?? "";
+}
+
+function inputValue(html: string, id: string): string {
+  const re = new RegExp(
+    `<input[^>]*\\bid=["']${id}["'][^>]*\\bvalue=["']([^"']*)["']`,
+    "i"
+  );
+  const m = html.match(re);
+  if (m) return m[1].trim();
+  // value may appear before id
+  const re2 = new RegExp(
+    `<input[^>]*\\bvalue=["']([^"']*)["'][^>]*\\bid=["']${id}["']`,
+    "i"
+  );
+  const m2 = html.match(re2);
+  return m2?.[1]?.trim() ?? "";
+}
+
+function titleFromHtml(html: string): string {
+  const t = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  if (t?.[1]?.trim()) return t[1].trim();
+  const h1 = html.match(/<h1[^>]*>([^<]*)<\/h1>/i);
+  return h1?.[1]?.trim() || "Tally Dashboard";
+}
+
+function parseFocus(raw: string): TallyLiveFocus {
+  if (raw === "outstanding" || raw === "trial_balance") return raw;
+  return "daybook";
+}
+
+/** Extract title / date range / focus from a live dashboard HTML shell. */
+export function parseLiveTallyDashboardMeta(html: string): TallyStaticMeta {
+  const focus = parseFocus(attrValue(html, "data-focus"));
+  const fromDate = toInputDate(inputValue(html, "fromDate")) || "";
+  const toDate = toInputDate(inputValue(html, "toDate")) || "";
+  return {
+    title: titleFromHtml(html).slice(0, 120),
+    fromDate,
+    toDate,
+    focus,
+  };
+}
+
+function asTabError(e: unknown): TallySnapshotTabError {
+  const msg = e instanceof Error ? e.message : String(e);
+  return { error: msg || "Export failed." };
+}
+
+function isTabError(v: unknown): v is TallySnapshotTabError {
+  return Boolean(v && typeof v === "object" && "error" in v && !("ok" in v));
 }
 
 /**
- * Build a self-contained live dashboard HTML page.
- * Charts render client-side from JSON delivered by the NELA host bridge.
+ * Fetch all three report tabs from Tally for a static snapshot.
+ * Throws if Tally is not connected.
  */
-export function buildTallyLiveDashboardHtml(
-  opts: TallyLiveDashboardOptions = {}
-): string {
-  const title = (opts.title?.trim() || "Live Tally Dashboard").slice(0, 120);
+export async function fetchTallyDashboardSnapshot(opts: {
+  fromDate?: string | null;
+  toDate?: string | null;
+  focus?: TallyLiveFocus;
+}): Promise<TallyDashboardSnapshot> {
+  grantTallySessionTrust();
+
+  const status = await Api.tallyStatus();
+  if (!status.connected) {
+    throw new Error(
+      "Tally is not connected. Connect in Settings first (HTTP on localhost), then download again."
+    );
+  }
+
+  const fromDate = toInputDate(opts.fromDate) || null;
+  const toDate = toInputDate(opts.toDate) || null;
   const focus = opts.focus ?? "daybook";
-  const defaults = defaultDateRange();
-  const from = toInputDate(opts.fromDate) || defaults.from;
-  const to = toInputDate(opts.toDate) || defaults.to;
-  const company = opts.companyHint?.trim() || "";
-  const host = opts.hostHint?.trim() || "127.0.0.1";
-  const port = opts.portHint ?? 9000;
+
+  const [daybookRes, outstandingRes, trialRes] = await Promise.all([
+    Api.tallyDaybook({
+      fromDate,
+      toDate,
+      maxRows: 200,
+    }).catch(asTabError),
+    Api.tallyOutstanding({ maxRows: 100 }).catch(asTabError),
+    Api.tallyTrialBalance({
+      fromDate,
+      toDate,
+      maxRows: 200,
+    }).catch(asTabError),
+  ]);
+
+  const wrapReport = (
+    res: { ok?: boolean; error?: string | null } | TallySnapshotTabError
+  ): unknown | TallySnapshotTabError => {
+    if (isTabError(res)) return res;
+    if (res && typeof res === "object" && res.ok === false) {
+      return { error: res.error || "Tally export failed." };
+    }
+    return res;
+  };
+
+  return {
+    company: status.company ?? null,
+    host: status.host ?? null,
+    port: status.port ?? null,
+    exportedAt: new Date().toISOString(),
+    fromDate: fromDate || "",
+    toDate: toDate || "",
+    focus,
+    daybook: wrapReport(daybookRes as { ok?: boolean; error?: string | null }),
+    outstanding: wrapReport(
+      outstandingRes as { ok?: boolean; error?: string | null }
+    ),
+    trial_balance: wrapReport(
+      trialRes as { ok?: boolean; error?: string | null }
+    ),
+  };
+}
+
+export type BuildTallyStaticDashboardOptions = {
+  title?: string;
+  snapshot: TallyDashboardSnapshot;
+};
+
+/**
+ * Build a self-contained static dashboard HTML page with baked Tally values.
+ * Opens in any browser (needs network only for ECharts CDN).
+ */
+export function buildTallyStaticDashboardHtml(
+  opts: BuildTallyStaticDashboardOptions
+): string {
+  const snap = opts.snapshot;
+  const title = (opts.title?.trim() || "Tally Dashboard Snapshot").slice(0, 120);
+  const focus = snap.focus ?? "daybook";
+  const from = snap.fromDate || "";
+  const to = snap.toDate || "";
+  const company = snap.company?.trim() || "";
+  const host = snap.host?.trim() || "127.0.0.1";
+  const port = snap.port ?? 9000;
+  const exportedLabel = (() => {
+    try {
+      return new Date(snap.exportedAt).toLocaleString();
+    } catch {
+      return snap.exportedAt;
+    }
+  })();
+
+  const snapshotJson = JSON.stringify(snap).replace(/</g, "\\u003c");
+
+  const rangeLabel =
+    from || to
+      ? `${esc(from || "…")} → ${esc(to || "…")}`
+      : "All dates";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -132,9 +235,9 @@ export function buildTallyLiveDashboardHtml(
       border-radius: 14px; margin-bottom: 1rem;
     }
     .toolbar label { display: flex; flex-direction: column; gap: .25rem; font-size: .72rem; color: var(--muted); font-weight: 600; }
-    .toolbar input, .toolbar select {
+    .toolbar .date-label {
       border: 1px solid var(--border); border-radius: 8px; padding: .4rem .55rem;
-      font: inherit; color: var(--txt); background: #fff; min-width: 9rem;
+      font: inherit; color: var(--txt); background: #f1f5f9; min-width: 9rem;
     }
     .tabs { display: flex; gap: .35rem; flex-wrap: wrap; }
     .tab {
@@ -142,11 +245,6 @@ export function buildTallyLiveDashboardHtml(
       padding: .35rem .75rem; font-size: .78rem; cursor: pointer; color: var(--muted);
     }
     .tab.active { background: color-mix(in srgb, var(--accent) 12%, #fff); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent); font-weight: 600; }
-    button.primary {
-      border: none; background: var(--accent); color: #fff; border-radius: 10px;
-      padding: .5rem 1rem; font-weight: 600; cursor: pointer; font-size: .85rem;
-    }
-    button.primary:disabled { opacity: .55; cursor: wait; }
     #status {
       margin: 0 0 1rem; padding: .55rem .75rem; border-radius: 10px;
       background: #eff6ff; color: #1e3a8a; font-size: .8rem; border: 1px solid #bfdbfe;
@@ -187,26 +285,14 @@ export function buildTallyLiveDashboardHtml(
     th { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; }
     footer { margin-top: 1.25rem; color: var(--muted); font-size: .72rem; }
     .empty { color: var(--muted); font-size: .85rem; padding: 1rem 0; }
-    #standalone {
-      display: none; margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 12px;
-      background: #fef2f2; color: var(--danger); font-size: .85rem; border: 1px solid #fecaca;
-      line-height: 1.5;
-    }
-    #standalone strong { display: block; margin-bottom: .25rem; }
   </style>
 </head>
-<body data-nela-tally-live="1" data-focus="${esc(focus)}">
+<body data-nela-tally-static="1" data-focus="${esc(focus)}">
   <div class="wrap">
     <header>
       <h1>${esc(title)}</h1>
-      <p class="sub">Live read-only export via NELA · ${esc(host)}:${port}${company ? " · " + esc(company) : ""}</p>
+      <p class="sub">Snapshot exported ${esc(exportedLabel)} · ${esc(host)}:${port}${company ? " · " + esc(company) : ""}</p>
     </header>
-
-    <div id="standalone" role="alert">
-      <strong>Open this dashboard inside NELA</strong>
-      Live Tally data cannot load from a browser <code>file://</code> page (each file is its own security origin, and there is no NELA bridge).
-      Use the in-app preview or side panel, then press Refresh.
-    </div>
 
     <div class="toolbar">
       <div class="tabs" role="tablist" aria-label="Report">
@@ -214,16 +300,12 @@ export function buildTallyLiveDashboardHtml(
         <button type="button" class="tab${focus === "outstanding" ? " active" : ""}" data-focus="outstanding">Outstanding</button>
         <button type="button" class="tab${focus === "trial_balance" ? " active" : ""}" data-focus="trial_balance">Trial Balance</button>
       </div>
-      <label>From
-        <input type="date" id="fromDate" value="${esc(from)}" />
+      <label>Period
+        <div class="date-label">${rangeLabel}</div>
       </label>
-      <label>To
-        <input type="date" id="toDate" value="${esc(to)}" />
-      </label>
-      <button type="button" class="primary" id="refreshBtn">Refresh</button>
     </div>
 
-    <div id="status">Loading live data from Tally…</div>
+    <div id="status">Loading snapshot…</div>
     <div id="mismatch"></div>
     <div class="kpis" id="kpi-grid"></div>
     <div class="charts">
@@ -234,48 +316,30 @@ export function buildTallyLiveDashboardHtml(
       <h3 id="table-title">Details</h3>
       <div id="table-wrap"><p class="empty">Waiting for data…</p></div>
     </div>
-    <footer>Live via NELA · requires TallyPrime HTTP on this machine · Refresh to reload · figures are not invented</footer>
+    <footer>Static snapshot · figures baked at export · does not require Tally or NELA · tabs switch among exported reports</footer>
   </div>
+  <script type="application/json" id="tally-snapshot">${snapshotJson}</script>
   <script>
 (function () {
-  var REQ = "${NELA_TALLY_REQUEST}";
-  var RES = "${NELA_TALLY_RESPONSE}";
-  var SEL = "${NELA_TALLY_SELECTION}";
   var focus = document.body.getAttribute("data-focus") || "daybook";
-  var pending = {};
   var chartMix = null;
   var chartTrend = null;
-  var seq = 0;
-  // Live bridge only works when this page is previewed inside NELA (iframe/srcDoc).
-  // Top-level file:// in Chrome/Firefox is a unique origin and has no host bridge.
-  var embedded = false;
+  var snap = null;
   try {
-    embedded = !!(window.parent && window.parent !== window);
+    var el = document.getElementById("tally-snapshot");
+    snap = el ? JSON.parse(el.textContent || "{}") : {};
   } catch (_e) {
-    embedded = false;
+    snap = {};
   }
-  if (!embedded) {
-    var banner = document.getElementById("standalone");
-    if (banner) banner.style.display = "block";
-  }
+  var from = (snap && snap.fromDate) || "";
+  var to = (snap && snap.toDate) || "";
+  var meta = {
+    company: (snap && snap.company) || null,
+    host: (snap && snap.host) || null,
+    port: (snap && snap.port) || null
+  };
 
   function $(id) { return document.getElementById(id); }
-  function publishSelection() {
-    var from = ($("fromDate") && $("fromDate").value) || null;
-    var to = ($("toDate") && $("toDate").value) || null;
-    document.body.setAttribute("data-from", from || "");
-    document.body.setAttribute("data-to", to || "");
-    document.body.setAttribute("data-focus", focus);
-    if (!embedded) return;
-    try {
-      window.parent.postMessage({
-        type: SEL,
-        fromDate: from,
-        toDate: to,
-        focus: focus
-      }, "*");
-    } catch (_e) { /* ignore */ }
-  }
   function setStatus(msg, kind) {
     var el = $("status");
     el.textContent = msg;
@@ -296,16 +360,14 @@ export function buildTallyLiveDashboardHtml(
     var t = String(s).replace(/,/g, "").trim();
     var n = parseFloat(t);
     if (Number.isFinite(n)) return n;
-    // Multi-currency Tally text: "... = -₹ 2404333.80" (₹ may show as ?)
     var eq = t.lastIndexOf("=");
-    var focus = eq >= 0 ? t.slice(eq + 1) : t;
-    var m = focus.match(/[+-]?\\d+(?:\\.\\d+)?/);
+    var focusAmt = eq >= 0 ? t.slice(eq + 1) : t;
+    var m = focusAmt.match(/[+-]?\\d+(?:\\.\\d+)?/);
     if (!m) m = t.match(/[+-]?\\d+(?:\\.\\d+)?/);
     if (!m) return NaN;
     n = parseFloat(m[0]);
     return Number.isFinite(n) ? n : NaN;
   }
-  /** Tally dates: YYYYMMDD or already ISO */
   function normalizeDate(s) {
     if (!s) return "";
     var d = String(s).replace(/\\D/g, "");
@@ -313,46 +375,12 @@ export function buildTallyLiveDashboardHtml(
     if (/^\\d{4}-\\d{2}-\\d{2}/.test(String(s))) return String(s).slice(0, 10);
     return "";
   }
-  function inRange(iso, from, to) {
+  function inRange(iso, fromD, toD) {
     if (!iso) return false;
-    if (from && iso < from) return false;
-    if (to && iso > to) return false;
+    if (fromD && iso < fromD) return false;
+    if (toD && iso > toD) return false;
     return true;
   }
-  function request(kind, extra) {
-    return new Promise(function (resolve) {
-      if (!embedded) {
-        resolve({
-          ok: false,
-          error: "Open this live dashboard inside NELA (in-app preview). Browsers block file:// Tally bridges."
-        });
-        return;
-      }
-      var id = "t" + (++seq) + "-" + Date.now();
-      pending[id] = resolve;
-      var msg = Object.assign({ type: REQ, id: id, kind: kind }, extra || {});
-      try { window.parent.postMessage(msg, "*"); }
-      catch (e) {
-        delete pending[id];
-        resolve({ ok: false, error: "Could not reach NELA host bridge." });
-      }
-      setTimeout(function () {
-        if (pending[id]) {
-          delete pending[id];
-          resolve({ ok: false, error: "Timed out waiting for NELA / Tally (60s)." });
-        }
-      }, 60000);
-    });
-  }
-  window.addEventListener("message", function (ev) {
-    var data = ev.data;
-    if (!data || data.type !== RES || !data.id) return;
-    var resolve = pending[data.id];
-    if (!resolve) return;
-    delete pending[data.id];
-    resolve(data);
-  });
-
   function ensureCharts() {
     if (typeof echarts === "undefined") return;
     if (!chartMix) chartMix = echarts.init($("chart-mix"), null, { renderer: "svg" });
@@ -376,15 +404,29 @@ export function buildTallyLiveDashboardHtml(
     }).join("");
     wrap.innerHTML = "<table><thead><tr>" + th + "</tr></thead><tbody>" + body + "</tbody></table>";
   }
+  function isErr(payload) {
+    return payload && typeof payload === "object" && payload.error && !payload.lines && !payload.rows && !payload.receivables;
+  }
+  function showTabError(payload) {
+    setMismatch("");
+    setKpis([]);
+    $("chart-mix-title").textContent = "Breakdown";
+    $("chart-trend-title").textContent = "Trend";
+    $("table-title").textContent = "Details";
+    if (chartMix) chartMix.clear();
+    if (chartTrend) chartTrend.clear();
+    $("table-wrap").innerHTML = '<p class="empty">' + (payload && payload.error ? payload.error : "No data for this tab.") + "</p>";
+    setStatus(payload && payload.error ? payload.error : "Tab unavailable in this snapshot.", "error");
+  }
 
-  function renderDaybook(payload, from, to, meta) {
+  function renderDaybook(payload, fromD, toD, metaObj) {
     var lines = (payload && payload.lines) || [];
     var filtered = [];
     var outside = 0;
     for (var i = 0; i < lines.length; i++) {
       var iso = normalizeDate(lines[i].date);
-      if (from || to) {
-        if (inRange(iso, from, to)) filtered.push(lines[i]);
+      if (fromD || toD) {
+        if (inRange(iso, fromD, toD)) filtered.push(lines[i]);
         else outside++;
       } else {
         filtered.push(lines[i]);
@@ -392,7 +434,7 @@ export function buildTallyLiveDashboardHtml(
     }
     if (outside > 0) {
       setMismatch("Data mismatch: Tally returned " + lines.length + " vouchers; " + outside +
-        " fall outside " + (from || "…") + " → " + (to || "…") + ". Charts use in-range rows only (" + filtered.length + ").");
+        " fall outside " + (fromD || "…") + " → " + (toD || "…") + ". Charts use in-range rows only (" + filtered.length + ").");
     } else {
       setMismatch("");
     }
@@ -413,7 +455,7 @@ export function buildTallyLiveDashboardHtml(
       { label: "Vouchers", value: String(filtered.length) },
       { label: "Total value", value: money(total) },
       { label: "Types", value: String(Object.keys(byType).length) },
-      { label: "Company", value: (meta && meta.company) || "—" }
+      { label: "Company", value: (metaObj && metaObj.company) || "—" }
     ]);
     $("chart-mix-title").textContent = "Amount by voucher type";
     $("chart-trend-title").textContent = "Activity by day";
@@ -450,7 +492,7 @@ export function buildTallyLiveDashboardHtml(
     );
   }
 
-  function renderOutstanding(payload, meta) {
+  function renderOutstanding(payload, metaObj) {
     setMismatch("");
     var recv = (payload && payload.receivables && payload.receivables.ledgers) || [];
     var pay = (payload && payload.payables && payload.payables.ledgers) || [];
@@ -503,7 +545,7 @@ export function buildTallyLiveDashboardHtml(
     );
   }
 
-  function renderTrial(payload, meta) {
+  function renderTrial(payload, metaObj) {
     setMismatch("");
     var rows = (payload && (payload.rows || payload.ledgers)) || [];
     var debitTot = 0;
@@ -521,7 +563,7 @@ export function buildTallyLiveDashboardHtml(
       { label: "Accounts", value: String(rows.length) },
       { label: "Debit (Dr)", value: money(debitTot) },
       { label: "Credit (Cr)", value: money(creditTot) },
-      { label: "Company", value: (meta && meta.company) || "—" }
+      { label: "Company", value: (metaObj && metaObj.company) || "—" }
     ]);
     $("chart-mix-title").textContent = "Debit vs credit";
     $("chart-trend-title").textContent = "Top accounts";
@@ -569,46 +611,19 @@ export function buildTallyLiveDashboardHtml(
     );
   }
 
-  async function refresh() {
-    if (!embedded) {
-      setStatus("Use NELA’s in-app preview — live Tally will not load from a browser file:// page.", "error");
+  function showFocus() {
+    var where = (meta.host || "127.0.0.1") + ":" + (meta.port || "?");
+    var when = (snap && snap.exportedAt) ? new Date(snap.exportedAt).toLocaleString() : "";
+    var kind = focus === "outstanding" ? "outstanding" : focus === "trial_balance" ? "trial_balance" : "daybook";
+    var payload = snap && snap[kind];
+    if (isErr(payload)) {
+      showTabError(payload);
       return;
     }
-    var btn = $("refreshBtn");
-    btn.disabled = true;
-    setStatus("Refreshing from Tally…");
-    var from = $("fromDate").value || null;
-    var to = $("toDate").value || null;
-    publishSelection();
-    try {
-      var st = await request("status");
-      if (!st.ok) {
-        setStatus(st.error || "Tally not connected. Start TallyPrime with HTTP enabled and Connect in NELA.", "error");
-        btn.disabled = false;
-        return;
-      }
-      var meta = st.meta || {};
-      var kind = focus === "outstanding" ? "outstanding" : focus === "trial_balance" ? "trial_balance" : "daybook";
-      var res = await request(kind, { fromDate: from, toDate: to, maxRows: 200 });
-      if (!res.ok) {
-        if (res.needsAllow) {
-          setStatus("Reconnect Tally in Settings, then Refresh.", "warn");
-        } else {
-          setStatus(res.error || "Export failed. Is Tally running on the connected port?", "error");
-        }
-        btn.disabled = false;
-        return;
-      }
-      var where = (meta.host || "127.0.0.1") + ":" + (meta.port || "?");
-      var when = new Date().toLocaleTimeString();
-      setStatus("Connected · " + where + (meta.company ? " · " + meta.company : "") + " · refreshed " + when);
-      if (kind === "daybook") renderDaybook(res.data, from, to, meta);
-      else if (kind === "outstanding") renderOutstanding(res.data, meta);
-      else renderTrial(res.data, meta);
-    } catch (e) {
-      setStatus(String(e && e.message ? e.message : e), "error");
-    }
-    btn.disabled = false;
+    setStatus("Snapshot · " + where + (meta.company ? " · " + meta.company : "") + (when ? " · exported " + when : ""));
+    if (kind === "daybook") renderDaybook(payload, from, to, meta);
+    else if (kind === "outstanding") renderOutstanding(payload, meta);
+    else renderTrial(payload, meta);
     if (chartMix) chartMix.resize();
     if (chartTrend) chartTrend.resize();
   }
@@ -619,25 +634,56 @@ export function buildTallyLiveDashboardHtml(
       tab.classList.add("active");
       focus = tab.getAttribute("data-focus") || "daybook";
       document.body.setAttribute("data-focus", focus);
-      publishSelection();
-      refresh();
+      showFocus();
     });
-  });
-  $("refreshBtn").addEventListener("click", refresh);
-  ["fromDate", "toDate"].forEach(function (id) {
-    var el = $(id);
-    if (!el) return;
-    el.addEventListener("change", publishSelection);
-    el.addEventListener("input", publishSelection);
   });
   window.addEventListener("resize", function () {
     if (chartMix) chartMix.resize();
     if (chartTrend) chartTrend.resize();
   });
-  publishSelection();
-  refresh();
+  showFocus();
 })();
   </script>
 </body>
 </html>`;
+}
+
+/**
+ * Build a static snapshot HTML from a live dashboard shell + live Tally fetch.
+ * `selection` overrides dates/focus from the on-disk shell (e.g. iframe preview period).
+ */
+export async function materializeTallyDashboardSnapshot(
+  liveHtml: string,
+  selection?: {
+    fromDate?: string | null;
+    toDate?: string | null;
+    focus?: TallyLiveFocus;
+  }
+): Promise<{ html: string; snapshot: TallyDashboardSnapshot; title: string }> {
+  const meta = parseLiveTallyDashboardMeta(liveHtml);
+  const fromDate = (selection?.fromDate ?? meta.fromDate) || null;
+  const toDate = (selection?.toDate ?? meta.toDate) || null;
+  const focus = selection?.focus ?? meta.focus;
+  const snapshot = await fetchTallyDashboardSnapshot({
+    fromDate,
+    toDate,
+    focus,
+  });
+  const title = meta.title;
+  const html = buildTallyStaticDashboardHtml({
+    title,
+    snapshot,
+  });
+  return { html, snapshot, title };
+}
+
+/** UTF-8 string → base64 for Api.saveBinaryFile. */
+export function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
