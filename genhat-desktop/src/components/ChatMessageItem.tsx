@@ -285,7 +285,7 @@ function ChatMessageItemInner({
                 {msg.role === "user" ? (
                   <>
                     <div className="flex flex-col items-end flex-1 min-w-0">
-                      <div className="py-3 px-4 rounded-2xl rounded-tr-sm text-[0.9rem] leading-relaxed text-txt max-w-[85%] bg-glass-bg border border-glass-border">
+                      <div className="py-3 px-4 rounded-2xl rounded-tr-sm text-[0.9rem] leading-relaxed text-txt max-w-[85%] bg-[var(--color-user-msg-bg)] border border-[var(--color-user-msg-border)]">
                         {msg.visionImage && (
                           <div className="mb-2.5">
                             <VisionMessageImage
@@ -340,7 +340,7 @@ function ChatMessageItemInner({
                       draggable={false}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[0.9rem] leading-relaxed text-txt glass rounded-2xl rounded-tl-sm py-3 px-4">
+                      <div className="text-[0.9rem] leading-relaxed text-txt py-0.5">
                         {msg.thinking?.trim() ? (
                           <ReasoningDisclosure thinking={msg.thinking} />
                         ) : null}

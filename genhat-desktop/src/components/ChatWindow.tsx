@@ -1019,7 +1019,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
             liveToolStatus ||
             streamingThinking.trim() ||
             (streamingContent && !looksLikeArtifactDump(streamingContent)) ? (
-              <div className="flex-1 min-w-0 text-[0.9rem] leading-relaxed text-txt glass rounded-2xl rounded-tl-sm py-3 px-4">
+              <div className="flex-1 min-w-0 text-[0.9rem] leading-relaxed text-txt py-0.5">
                 {streamingThinking.trim() ? (
                   <ReasoningDisclosure thinking={streamingThinking} streaming />
                 ) : null}
@@ -1039,7 +1039,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
               </div>
             ) : (
               <div
-                className="glass rounded-2xl rounded-tl-sm py-3 px-4 w-fit"
+                className="w-fit py-0.5"
                 role="status"
                 aria-label="NELA is typing"
               >
