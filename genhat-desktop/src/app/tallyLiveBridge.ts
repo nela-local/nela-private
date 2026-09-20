@@ -46,6 +46,18 @@ async function runKind(
       return Api.tallyOutstanding({ maxRows: req.maxRows ?? 100 });
     case "list_ledgers":
       return Api.tallyListLedgers({ maxRows: req.maxRows ?? 200 });
+    case "sales":
+      return Api.tallySales({
+        fromDate: req.fromDate ?? null,
+        toDate: req.toDate ?? null,
+        maxRows: req.maxRows ?? 200,
+      });
+    case "cash_bank":
+      return Api.tallyCashBank({
+        fromDate: req.fromDate ?? null,
+        toDate: req.toDate ?? null,
+        maxRows: req.maxRows ?? 100,
+      });
     default:
       throw new Error(`Unknown Tally live kind: ${kind}`);
   }

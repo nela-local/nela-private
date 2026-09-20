@@ -5,6 +5,8 @@ export type TallyAccessKind =
   | "trial_balance"
   | "daybook"
   | "outstanding"
+  | "sales"
+  | "cash_bank"
   | "live_dashboard"
   | "export_excel";
 

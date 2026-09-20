@@ -511,6 +511,8 @@ fn main() {
             app_lib::commands::tally::tally_trial_balance,
             app_lib::commands::tally::tally_daybook,
             app_lib::commands::tally::tally_outstanding,
+            app_lib::commands::tally::tally_sales,
+            app_lib::commands::tally::tally_cash_bank,
             // Cloud storage connectors (File Indexer mirrors)
             app_lib::commands::connectors::connectors_list_providers,
             app_lib::commands::connectors::connectors_list_connections,

@@ -719,14 +719,53 @@ export const TALLY_OUTSTANDING_TOOL: CloudToolDefinition = {
   },
 };
 
+export const TALLY_SALES_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_sales",
+    description:
+      "Export Sales vouchers from Tally (read-only) for a date range, with by-day and by-party totals. User must approve. Prefer tally_live_dashboard with focus=sales for charts.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string" },
+        to_date: { type: "string" },
+        max_rows: { type: "integer", description: "Max vouchers (1–200)." },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
+export const TALLY_CASH_BANK_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "tally_cash_bank",
+    description:
+      "Export Cash-in-Hand and Bank Accounts ledger balances plus Payment/Receipt/Contra movement from Tally (read-only). User must approve. Prefer tally_live_dashboard with focus=cash_bank for charts.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string", description: "Period for movement series." },
+        to_date: { type: "string" },
+        max_rows: { type: "integer", description: "Max ledgers / movement rows." },
+        purpose: { type: "string" },
+      },
+      required: [],
+    },
+  },
+};
+
 export const TALLY_LIVE_DASHBOARD_TOOL: CloudToolDefinition = {
   type: "function",
   function: {
     name: "tally_live_dashboard",
     description:
-      "Open a LIVE Tally dashboard artifact in NELA (KPIs + charts that Refresh from Tally via the host). " +
-      "Use this for any visualization / dashboard / chart request about Tally — do NOT bake voucher tables into generate_html. " +
-      "User allows once; the page refreshes live while Tally HTTP is running.",
+      "Open a LIVE Tally dashboard artifact in NELA (KPIs + pie/bar/line charts that Refresh from Tally via the host). " +
+      "DEFAULT for any visualization / dashboard / report about Tally — do NOT bake voucher tables into generate_html. " +
+      "Tabs: Day Book, Sales, Cash & Bank, Outstanding, Trial Balance. Pick focus to open the right tab. " +
+      "Only use tally_* + render_chart for explicitly custom chart layouts.",
     parameters: {
       type: "object",
       properties: {
@@ -741,7 +780,7 @@ export const TALLY_LIVE_DASHBOARD_TOOL: CloudToolDefinition = {
         },
         focus: {
           type: "string",
-          enum: ["daybook", "outstanding", "trial_balance"],
+          enum: ["daybook", "outstanding", "trial_balance", "sales", "cash_bank"],
           description: "Initial report tab",
         },
         purpose: { type: "string" },
@@ -888,6 +927,8 @@ export function buildCloudChatTools(options?: {
       TALLY_TRIAL_BALANCE_TOOL,
       TALLY_DAYBOOK_TOOL,
       TALLY_OUTSTANDING_TOOL,
+      TALLY_SALES_TOOL,
+      TALLY_CASH_BANK_TOOL,
       TALLY_LIVE_DASHBOARD_TOOL,
       TALLY_EXPORT_EXCEL_TOOL
     );

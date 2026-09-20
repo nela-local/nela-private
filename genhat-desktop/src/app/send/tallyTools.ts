@@ -3,7 +3,10 @@
  */
 
 import { Api } from "../../api";
-import { buildTallyLiveDashboardHtml } from "../tallyLiveDashboard";
+import {
+  buildTallyLiveDashboardHtml,
+  normalizeTallyLiveFocus,
+} from "../tallyLiveDashboard";
 import {
   cancelTallyAccessConfirm,
   grantTallySessionTrust,
@@ -214,6 +217,55 @@ export async function executeTallyOutstanding(
   );
 }
 
+export async function executeTallySales(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const fromDate = optStr(args, "from_date", "fromDate", "from");
+  const toDate = optStr(args, "to_date", "toDate", "to");
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 100, 200);
+  const purpose = purposeOf(args, "Export Tally sales vouchers and summaries");
+  return withConfirm(
+    "sales",
+    { purpose, fromDate, toDate, maxRows },
+    () => Api.tallySales({ fromDate, toDate, maxRows }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow sales export…",
+      runningLabel: "Reading sales from Tally…",
+    }
+  );
+}
+
+export async function executeTallyCashBank(
+  args: Record<string, unknown>,
+  options?: {
+    signal?: AbortSignal;
+    onStatus?: (message: string | null) => void;
+  }
+) {
+  const fromDate = optStr(args, "from_date", "fromDate", "from");
+  const toDate = optStr(args, "to_date", "toDate", "to");
+  const maxRows = clampMax(args.max_rows ?? args.maxRows, 80, 100);
+  const purpose = purposeOf(
+    args,
+    "Export Tally cash & bank balances and Payment/Receipt/Contra movement"
+  );
+  return withConfirm(
+    "cash_bank",
+    { purpose, fromDate, toDate, maxRows },
+    () => Api.tallyCashBank({ fromDate, toDate, maxRows }),
+    {
+      ...options,
+      waitingLabel: "Waiting for you to allow cash & bank export…",
+      runningLabel: "Reading cash & bank from Tally…",
+    }
+  );
+}
+
 export async function executeTallyLiveDashboard(
   args: Record<string, unknown>,
   options?: {
@@ -233,11 +285,7 @@ export async function executeTallyLiveDashboard(
   const toDate = optStr(args, "to_date", "toDate", "to");
   const title =
     optStr(args, "title") || "Live Tally Dashboard";
-  const focusRaw = optStr(args, "focus") || "daybook";
-  const focus =
-    focusRaw === "outstanding" || focusRaw === "trial_balance"
-      ? focusRaw
-      : "daybook";
+  const focus = normalizeTallyLiveFocus(optStr(args, "focus") || "daybook");
 
   if (options?.signal?.aborted) {
     return { ok: false, reason: "user_cancelled" };

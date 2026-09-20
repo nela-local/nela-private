@@ -3,7 +3,12 @@
  * Fetches data via postMessage → NELA parent (not direct localhost CORS).
  */
 
-export type TallyLiveFocus = "daybook" | "outstanding" | "trial_balance";
+export type TallyLiveFocus =
+  | "daybook"
+  | "outstanding"
+  | "trial_balance"
+  | "sales"
+  | "cash_bank";
 
 export type TallyLiveDashboardOptions = {
   title?: string;
@@ -23,7 +28,9 @@ export type TallyLiveRequestKind =
   | "daybook"
   | "outstanding"
   | "trial_balance"
-  | "list_ledgers";
+  | "list_ledgers"
+  | "sales"
+  | "cash_bank";
 
 export type TallyLiveRequestMessage = {
   type: typeof NELA_TALLY_REQUEST;
@@ -69,6 +76,17 @@ export function toInputDate(raw: string | null | undefined): string {
   return "";
 }
 
+export function normalizeTallyLiveFocus(
+  raw: string | null | undefined
+): TallyLiveFocus {
+  const f = (raw || "").trim().toLowerCase().replace(/-/g, "_");
+  if (f === "outstanding") return "outstanding";
+  if (f === "trial_balance" || f === "trialbalance") return "trial_balance";
+  if (f === "sales") return "sales";
+  if (f === "cash_bank" || f === "cashbank" || f === "cash") return "cash_bank";
+  return "daybook";
+}
+
 /** Default: last 30 days ending today (UTC date parts). */
 function defaultDateRange(): { from: string; to: string } {
   const to = new Date();
@@ -87,7 +105,7 @@ export function buildTallyLiveDashboardHtml(
   opts: TallyLiveDashboardOptions = {}
 ): string {
   const title = (opts.title?.trim() || "Live Tally Dashboard").slice(0, 120);
-  const focus = opts.focus ?? "daybook";
+  const focus = normalizeTallyLiveFocus(opts.focus);
   const defaults = defaultDateRange();
   const from = toInputDate(opts.fromDate) || defaults.from;
   const to = toInputDate(opts.toDate) || defaults.to;
@@ -122,19 +140,25 @@ export function buildTallyLiveDashboardHtml(
       color: var(--txt);
       line-height: 1.45;
     }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
     header h1 { margin: 0 0 .25rem; font-size: 1.35rem; font-weight: 700; }
     .sub { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
     .toolbar {
       display: flex; flex-wrap: wrap; gap: .6rem; align-items: end;
       padding: .85rem 1rem; background: var(--card); border: 1px solid var(--border);
-      border-radius: 14px; margin-bottom: 1rem;
+      border-radius: 14px; margin-bottom: .65rem;
     }
     .toolbar label { display: flex; flex-direction: column; gap: .25rem; font-size: .72rem; color: var(--muted); font-weight: 600; }
     .toolbar input, .toolbar select {
       border: 1px solid var(--border); border-radius: 8px; padding: .4rem .55rem;
       font: inherit; color: var(--txt); background: #fff; min-width: 9rem;
     }
+    .presets { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+    .preset {
+      border: 1px solid var(--border); background: #fff; border-radius: 8px;
+      padding: .35rem .55rem; font-size: .72rem; cursor: pointer; color: var(--muted);
+    }
+    .preset:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent); }
     .tabs { display: flex; gap: .35rem; flex-wrap: wrap; }
     .tab {
       border: 1px solid var(--border); background: #fff; border-radius: 999px;
@@ -146,6 +170,11 @@ export function buildTallyLiveDashboardHtml(
       padding: .5rem 1rem; font-weight: 600; cursor: pointer; font-size: .85rem;
     }
     button.primary:disabled { opacity: .55; cursor: wait; }
+    .chart-toggle {
+      border: 1px solid var(--border); background: #fff; border-radius: 6px;
+      padding: .15rem .45rem; font-size: .68rem; cursor: pointer; color: var(--muted);
+      float: right; margin-top: -2px;
+    }
     #status {
       margin: 0 0 1rem; padding: .55rem .75rem; border-radius: 10px;
       background: #eff6ff; color: #1e3a8a; font-size: .8rem; border: 1px solid #bfdbfe;
@@ -157,7 +186,7 @@ export function buildTallyLiveDashboardHtml(
       background: #fffbeb; color: var(--warn); font-size: .8rem; border: 1px solid #fde68a;
     }
     .kpis {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: .75rem; margin-bottom: 1rem;
     }
     .kpi {
@@ -165,17 +194,21 @@ export function buildTallyLiveDashboardHtml(
       padding: .85rem 1rem;
     }
     .kpi .lbl { font-size: .7rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-    .kpi .val { font-size: 1.35rem; font-weight: 700; margin-top: .2rem; }
+    .kpi .val { font-size: 1.2rem; font-weight: 700; margin-top: .2rem; word-break: break-word; }
     .charts {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: .85rem; margin-bottom: 1rem;
     }
     .chart-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-      padding: .75rem 1rem 1rem;
+      padding: .75rem 1rem 1rem; min-width: 0;
     }
-    .chart-card h3 { margin: 0 0 .5rem; font-size: .9rem; }
-    .chart-host { width: 100%; height: 280px; }
+    .chart-card.wide { grid-column: 1 / -1; }
+    @media (min-width: 900px) {
+      .chart-card.wide { grid-column: span 2; }
+    }
+    .chart-card h3 { margin: 0 0 .5rem; font-size: .9rem; overflow: hidden; }
+    .chart-host { width: 100%; height: 260px; }
     .table-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
       padding: .75rem 1rem 1rem; overflow: auto;
@@ -210,6 +243,8 @@ export function buildTallyLiveDashboardHtml(
     <div class="toolbar">
       <div class="tabs" role="tablist" aria-label="Report">
         <button type="button" class="tab${focus === "daybook" ? " active" : ""}" data-focus="daybook">Day Book</button>
+        <button type="button" class="tab${focus === "sales" ? " active" : ""}" data-focus="sales">Sales</button>
+        <button type="button" class="tab${focus === "cash_bank" ? " active" : ""}" data-focus="cash_bank">Cash &amp; Bank</button>
         <button type="button" class="tab${focus === "outstanding" ? " active" : ""}" data-focus="outstanding">Outstanding</button>
         <button type="button" class="tab${focus === "trial_balance" ? " active" : ""}" data-focus="trial_balance">Trial Balance</button>
       </div>
@@ -219,6 +254,12 @@ export function buildTallyLiveDashboardHtml(
       <label>To
         <input type="date" id="toDate" value="${esc(to)}" />
       </label>
+      <div class="presets" aria-label="Period presets">
+        <button type="button" class="preset" data-preset="7d">7d</button>
+        <button type="button" class="preset" data-preset="30d">30d</button>
+        <button type="button" class="preset" data-preset="mtd">MTD</button>
+        <button type="button" class="preset" data-preset="fy">This FY</button>
+      </div>
       <button type="button" class="primary" id="refreshBtn">Refresh</button>
     </div>
 
@@ -226,8 +267,9 @@ export function buildTallyLiveDashboardHtml(
     <div id="mismatch"></div>
     <div class="kpis" id="kpi-grid"></div>
     <div class="charts">
-      <div class="chart-card"><h3 id="chart-mix-title">Breakdown</h3><div class="chart-host" id="chart-mix"></div></div>
-      <div class="chart-card"><h3 id="chart-trend-title">Trend</h3><div class="chart-host" id="chart-trend"></div></div>
+      <div class="chart-card"><h3 id="chart-a-title">Breakdown</h3><div class="chart-host" id="chart-a"></div></div>
+      <div class="chart-card"><h3 id="chart-b-title">Trend <button type="button" class="chart-toggle" id="trendToggle" title="Toggle bar/line">Line</button></h3><div class="chart-host" id="chart-b"></div></div>
+      <div class="chart-card" id="chart-c-card"><h3 id="chart-c-title">Detail</h3><div class="chart-host" id="chart-c"></div></div>
     </div>
     <div class="table-card">
       <h3 id="table-title">Details</h3>
@@ -241,11 +283,11 @@ export function buildTallyLiveDashboardHtml(
   var RES = "${NELA_TALLY_RESPONSE}";
   var focus = document.body.getAttribute("data-focus") || "daybook";
   var pending = {};
-  var chartMix = null;
-  var chartTrend = null;
+  var charts = { a: null, b: null, c: null };
+  var trendMode = "line";
+  var lastTrend = null;
   var seq = 0;
-  // Live bridge only works when this page is previewed inside NELA (iframe/srcDoc).
-  // Top-level file:// in Chrome/Firefox is a unique origin and has no host bridge.
+  var PALETTE = ["#2563eb", "#0ea5e9", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#64748b"];
   var embedded = false;
   try {
     embedded = !!(window.parent && window.parent !== window);
@@ -278,16 +320,14 @@ export function buildTallyLiveDashboardHtml(
     var t = String(s).replace(/,/g, "").trim();
     var n = parseFloat(t);
     if (Number.isFinite(n)) return n;
-    // Multi-currency Tally text: "... = -₹ 2404333.80" (₹ may show as ?)
     var eq = t.lastIndexOf("=");
-    var focus = eq >= 0 ? t.slice(eq + 1) : t;
-    var m = focus.match(/[+-]?\\d+(?:\\.\\d+)?/);
+    var focusAmt = eq >= 0 ? t.slice(eq + 1) : t;
+    var m = focusAmt.match(/[+-]?\\d+(?:\\.\\d+)?/);
     if (!m) m = t.match(/[+-]?\\d+(?:\\.\\d+)?/);
     if (!m) return NaN;
     n = parseFloat(m[0]);
     return Number.isFinite(n) ? n : NaN;
   }
-  /** Tally dates: YYYYMMDD or already ISO */
   function normalizeDate(s) {
     if (!s) return "";
     var d = String(s).replace(/\\D/g, "");
@@ -300,6 +340,25 @@ export function buildTallyLiveDashboardHtml(
     if (from && iso < from) return false;
     if (to && iso > to) return false;
     return true;
+  }
+  function fmtUtc(d) {
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  }
+  function applyPreset(key) {
+    var to = new Date();
+    var from = new Date(to);
+    if (key === "7d") from.setUTCDate(from.getUTCDate() - 7);
+    else if (key === "30d") from.setUTCDate(from.getUTCDate() - 30);
+    else if (key === "mtd") from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+    else if (key === "fy") {
+      var y = to.getUTCFullYear();
+      var m = to.getUTCMonth();
+      var fyStartYear = m >= 3 ? y : y - 1;
+      from = new Date(Date.UTC(fyStartYear, 3, 1));
+    }
+    $("fromDate").value = fmtUtc(from);
+    $("toDate").value = fmtUtc(to);
+    refresh();
   }
   function request(kind, extra) {
     return new Promise(function (resolve) {
@@ -337,8 +396,12 @@ export function buildTallyLiveDashboardHtml(
 
   function ensureCharts() {
     if (typeof echarts === "undefined") return;
-    if (!chartMix) chartMix = echarts.init($("chart-mix"), null, { renderer: "svg" });
-    if (!chartTrend) chartTrend = echarts.init($("chart-trend"), null, { renderer: "svg" });
+    ["a", "b", "c"].forEach(function (k) {
+      if (!charts[k]) charts[k] = echarts.init($("chart-" + k), null, { renderer: "svg" });
+    });
+  }
+  function resizeCharts() {
+    ["a", "b", "c"].forEach(function (k) { if (charts[k]) charts[k].resize(); });
   }
   function setKpis(items) {
     var grid = $("kpi-grid");
@@ -357,6 +420,72 @@ export function buildTallyLiveDashboardHtml(
       return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>";
     }).join("");
     wrap.innerHTML = "<table><thead><tr>" + th + "</tr></thead><tbody>" + body + "</tbody></table>";
+  }
+  function setChartTitles(a, b, c) {
+    $("chart-a-title").textContent = a;
+    $("chart-b-title").childNodes[0].nodeValue = b + " ";
+    $("chart-c-title").textContent = c;
+  }
+  /** @param {{type:string,labels?:string[],values?:number[],series?:{name:string,values:number[]}[], rotate?:boolean}} cfg */
+  function setChart(slot, cfg) {
+    ensureCharts();
+    var chart = charts[slot];
+    if (!chart || !cfg) return;
+    var type = cfg.type || "bar";
+    var labels = cfg.labels || [];
+    var values = cfg.values || [];
+    var option;
+    if (type === "pie") {
+      option = {
+        color: PALETTE,
+        tooltip: { trigger: "item" },
+        series: [{
+          type: "pie",
+          radius: ["35%", "65%"],
+          data: labels.map(function (l, i) { return { name: l, value: values[i] || 0 }; })
+        }]
+      };
+    } else if (type === "grouped_bar" && cfg.series && cfg.series.length) {
+      option = {
+        color: PALETTE,
+        tooltip: { trigger: "axis" },
+        legend: { top: 0 },
+        grid: { left: 48, right: 16, top: 36, bottom: cfg.rotate ? 72 : 32 },
+        xAxis: { type: "category", data: labels, axisLabel: cfg.rotate ? { rotate: 30 } : {} },
+        yAxis: { type: "value" },
+        series: cfg.series.map(function (s) {
+          return { name: s.name, type: "bar", data: s.values || [] };
+        })
+      };
+    } else {
+      var seriesType = type === "line" ? "line" : "bar";
+      option = {
+        color: PALETTE,
+        tooltip: { trigger: "axis" },
+        grid: { left: 48, right: 16, top: 24, bottom: cfg.rotate ? 72 : 32 },
+        xAxis: { type: "category", data: labels, axisLabel: cfg.rotate ? { rotate: 30 } : {} },
+        yAxis: { type: "value" },
+        series: [{
+          type: seriesType,
+          data: values,
+          smooth: seriesType === "line",
+          areaStyle: seriesType === "line" ? { opacity: 0.08 } : undefined,
+          itemStyle: { color: "#2563eb" }
+        }]
+      };
+    }
+    chart.setOption(option, true);
+  }
+  function applyTrendChart() {
+    if (!lastTrend) return;
+    setChart("b", {
+      type: trendMode,
+      labels: lastTrend.labels,
+      values: lastTrend.values,
+      rotate: lastTrend.rotate
+    });
+    var btn = $("trendToggle");
+    if (btn) btn.textContent = trendMode === "line" ? "Bar" : "Line";
   }
 
   function renderDaybook(payload, from, to, meta) {
@@ -382,6 +511,7 @@ export function buildTallyLiveDashboardHtml(
     var total = 0;
     var byType = {};
     var byDay = {};
+    var byParty = {};
     for (var j = 0; j < filtered.length; j++) {
       var row = filtered[j];
       var amt = Math.abs(parseAmt(row.amount));
@@ -390,34 +520,32 @@ export function buildTallyLiveDashboardHtml(
       byType[vt] = (byType[vt] || 0) + (Number.isFinite(amt) ? amt : 0);
       var day = normalizeDate(row.date) || "unknown";
       byDay[day] = (byDay[day] || 0) + (Number.isFinite(amt) ? amt : 1);
+      var party = (row.party || "Unknown").trim() || "Unknown";
+      byParty[party] = (byParty[party] || 0) + (Number.isFinite(amt) ? amt : 0);
     }
+    var dayKeys = Object.keys(byDay).sort();
+    var avgDay = dayKeys.length ? total / dayKeys.length : 0;
     setKpis([
       { label: "Vouchers", value: String(filtered.length) },
       { label: "Total value", value: money(total) },
+      { label: "Avg / day", value: money(avgDay) },
       { label: "Types", value: String(Object.keys(byType).length) },
       { label: "Company", value: (meta && meta.company) || "—" }
     ]);
-    $("chart-mix-title").textContent = "Amount by voucher type";
-    $("chart-trend-title").textContent = "Activity by day";
+    setChartTitles("Amount by voucher type", "Activity by day", "Top parties");
     $("table-title").textContent = "Voucher detail";
-    ensureCharts();
     var typeLabels = Object.keys(byType);
-    var typeVals = typeLabels.map(function (k) { return byType[k]; });
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: typeLabels.map(function (l, i) { return { name: l, value: typeVals[i] }; }) }]
-      }, true);
-    }
-    var days = Object.keys(byDay).sort();
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        xAxis: { type: "category", data: days },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: days.map(function (d) { return byDay[d]; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setChart("a", { type: "pie", labels: typeLabels, values: typeLabels.map(function (k) { return byType[k]; }) });
+    lastTrend = { labels: dayKeys, values: dayKeys.map(function (d) { return byDay[d]; }), rotate: false };
+    applyTrendChart();
+    var parties = Object.keys(byParty).map(function (k) { return { name: k, val: byParty[k] }; })
+      .sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
+    setChart("c", {
+      type: "bar",
+      labels: parties.map(function (p) { return p.name.slice(0, 18); }),
+      values: parties.map(function (p) { return p.val; }),
+      rotate: true
+    });
     setTable(
       ["Date", "Type", "Party", "Amount", "Narration"],
       filtered.map(function (r) {
@@ -444,39 +572,39 @@ export function buildTallyLiveDashboardHtml(
       }
       return t;
     }
+    function topN(list, n) {
+      return list.map(function (l) {
+        return { name: l.name, val: Math.abs(parseAmt(l.closingBalance || l.closing_balance)) };
+      }).filter(function (x) { return Number.isFinite(x.val); })
+        .sort(function (a, b) { return b.val - a.val; }).slice(0, n);
+    }
     var rTot = sum(recv);
     var pTot = sum(pay);
     setKpis([
       { label: "Receivables", value: money(rTot) },
       { label: "Payables", value: money(pTot) },
+      { label: "Net (R−P)", value: money(rTot - pTot) },
       { label: "Debtors", value: String(recv.length) },
       { label: "Creditors", value: String(pay.length) }
     ]);
-    $("chart-mix-title").textContent = "Receivables vs payables";
-    $("chart-trend-title").textContent = "Top parties";
+    setChartTitles("Receivables vs payables", "Top debtors", "Top creditors");
     $("table-title").textContent = "Outstanding ledgers";
-    ensureCharts();
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: [
-          { name: "Receivables", value: rTot },
-          { name: "Payables", value: pTot }
-        ]}]
-      }, true);
-    }
-    var combined = recv.concat(pay).map(function (l) {
-      return { name: l.name, val: Math.abs(parseAmt(l.closingBalance || l.closing_balance)), parent: l.parent || "" };
-    }).filter(function (x) { return Number.isFinite(x.val); }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        grid: { left: 40, right: 16, top: 24, bottom: 64 },
-        xAxis: { type: "category", data: combined.map(function (c) { return c.name.slice(0, 18); }), axisLabel: { rotate: 30 } },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: combined.map(function (c) { return c.val; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setChart("a", { type: "pie", labels: ["Receivables", "Payables"], values: [rTot, pTot] });
+    var debtors = topN(recv, 12);
+    lastTrend = {
+      labels: debtors.map(function (c) { return c.name.slice(0, 18); }),
+      values: debtors.map(function (c) { return c.val; }),
+      rotate: true
+    };
+    trendMode = "bar";
+    applyTrendChart();
+    var creditors = topN(pay, 12);
+    setChart("c", {
+      type: "bar",
+      labels: creditors.map(function (c) { return c.name.slice(0, 18); }),
+      values: creditors.map(function (c) { return c.val; }),
+      rotate: true
+    });
     setTable(
       ["Ledger", "Group", "Balance"],
       recv.concat(pay).map(function (l) {
@@ -490,54 +618,47 @@ export function buildTallyLiveDashboardHtml(
     var rows = (payload && (payload.rows || payload.ledgers)) || [];
     var debitTot = 0;
     var creditTot = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var d = Math.abs(parseAmt(rows[i].debit));
-      var c = Math.abs(parseAmt(rows[i].credit));
-      var closing = parseAmt(rows[i].closingBalance || rows[i].closing_balance);
+    var enriched = rows.map(function (r) {
+      var d = Math.abs(parseAmt(r.debit));
+      var c = Math.abs(parseAmt(r.credit));
+      var closing = parseAmt(r.closingBalance || r.closing_balance);
       if (Number.isFinite(d) && d > 0) debitTot += d;
       else if (Number.isFinite(closing) && closing < 0) debitTot += Math.abs(closing);
       if (Number.isFinite(c) && c > 0) creditTot += c;
       else if (Number.isFinite(closing) && closing > 0 && !(Number.isFinite(d) && d > 0)) creditTot += closing;
-    }
+      var debit = Number.isFinite(d) ? d : (Number.isFinite(closing) && closing < 0 ? Math.abs(closing) : 0);
+      var credit = Number.isFinite(c) ? c : (Number.isFinite(closing) && closing > 0 ? closing : 0);
+      var net = Math.abs(Number.isFinite(closing) ? closing : debit - credit);
+      return { name: r.name, debit: debit, credit: credit, net: net, raw: r };
+    });
     setKpis([
       { label: "Accounts", value: String(rows.length) },
       { label: "Debit (Dr)", value: money(debitTot) },
       { label: "Credit (Cr)", value: money(creditTot) },
+      { label: "Imbalance", value: money(Math.abs(debitTot - creditTot)) },
       { label: "Company", value: (meta && meta.company) || "—" }
     ]);
-    $("chart-mix-title").textContent = "Debit vs credit";
-    $("chart-trend-title").textContent = "Top accounts";
+    setChartTitles("Debit vs credit", "Top accounts", "Dr / Cr (top accounts)");
     $("table-title").textContent = "Trial balance";
-    ensureCharts();
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: [
-          { name: "Debit", value: debitTot || 0 },
-          { name: "Credit", value: creditTot || 0 }
-        ]}]
-      }, true);
-    }
-    var top = rows.map(function (r) {
-      var d = Math.abs(parseAmt(r.debit));
-      var c = Math.abs(parseAmt(r.credit));
-      var net = Math.abs(parseAmt(r.closingBalance || r.closing_balance));
-      var val = Math.max(
-        Number.isFinite(d) ? d : 0,
-        Number.isFinite(c) ? c : 0,
-        Number.isFinite(net) ? net : 0
-      );
-      return { name: r.name, val: val };
-    }).filter(function (x) { return Number.isFinite(x.val) && x.val > 0; }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        grid: { left: 40, right: 16, top: 24, bottom: 64 },
-        xAxis: { type: "category", data: top.map(function (c) { return c.name.slice(0, 18); }), axisLabel: { rotate: 30 } },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: top.map(function (c) { return c.val; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setChart("a", { type: "pie", labels: ["Debit", "Credit"], values: [debitTot || 0, creditTot || 0] });
+    var top = enriched.filter(function (x) { return x.net > 0; })
+      .sort(function (a, b) { return b.net - a.net; }).slice(0, 12);
+    lastTrend = {
+      labels: top.map(function (c) { return c.name.slice(0, 18); }),
+      values: top.map(function (c) { return c.net; }),
+      rotate: true
+    };
+    trendMode = "bar";
+    applyTrendChart();
+    setChart("c", {
+      type: "grouped_bar",
+      labels: top.map(function (c) { return c.name.slice(0, 14); }),
+      series: [
+        { name: "Debit", values: top.map(function (c) { return c.debit; }) },
+        { name: "Credit", values: top.map(function (c) { return c.credit; }) }
+      ],
+      rotate: true
+    });
     setTable(
       ["Account", "Debit (Dr)", "Credit (Cr)", "Net"],
       rows.slice(0, 80).map(function (r) {
@@ -549,6 +670,133 @@ export function buildTallyLiveDashboardHtml(
         ];
       })
     );
+  }
+
+  function renderSales(payload, meta) {
+    setMismatch("");
+    var lines = (payload && payload.lines) || [];
+    var summary = (payload && payload.summary) || {};
+    var total = Number(summary.total);
+    if (!Number.isFinite(total)) {
+      total = 0;
+      for (var i = 0; i < lines.length; i++) {
+        var a = Math.abs(parseAmt(lines[i].amount));
+        if (Number.isFinite(a)) total += a;
+      }
+    }
+    var byDay = summary.byDay || summary.by_day || [];
+    var byParty = summary.byParty || summary.by_party || [];
+    var voucherCount = summary.voucherCount != null ? summary.voucherCount : (summary.voucher_count != null ? summary.voucher_count : lines.length);
+    var partyCount = summary.partyCount != null ? summary.partyCount : (summary.party_count != null ? summary.party_count : byParty.length);
+    var avgTicket = voucherCount ? total / voucherCount : 0;
+    setKpis([
+      { label: "Sales total", value: money(total) },
+      { label: "Vouchers", value: String(voucherCount) },
+      { label: "Avg ticket", value: money(avgTicket) },
+      { label: "Customers", value: String(partyCount) },
+      { label: "Company", value: (meta && meta.company) || "—" }
+    ]);
+    setChartTitles("Top vs rest", "Sales by day", "Top customers");
+    $("table-title").textContent = "Sales vouchers";
+    var topParties = byParty.slice(0, 8);
+    var topSum = 0;
+    for (var t = 0; t < topParties.length; t++) topSum += Number(topParties[t].amount) || 0;
+    var rest = Math.max(0, total - topSum);
+    setChart("a", {
+      type: "pie",
+      labels: ["Top customers", "Other"],
+      values: [topSum, rest]
+    });
+    lastTrend = {
+      labels: byDay.map(function (d) { return d.name; }),
+      values: byDay.map(function (d) { return Number(d.amount) || 0; }),
+      rotate: false
+    };
+    trendMode = "line";
+    applyTrendChart();
+    setChart("c", {
+      type: "bar",
+      labels: byParty.slice(0, 12).map(function (p) { return String(p.name).slice(0, 18); }),
+      values: byParty.slice(0, 12).map(function (p) { return Number(p.amount) || 0; }),
+      rotate: true
+    });
+    setTable(
+      ["Date", "Party", "Amount", "Narration"],
+      lines.map(function (r) {
+        return [
+          normalizeDate(r.date) || (r.date || "—"),
+          r.party || "—",
+          money(parseAmt(r.amount)),
+          (r.narration || "—").toString().slice(0, 120)
+        ];
+      })
+    );
+  }
+
+  function renderCashBank(payload, meta) {
+    setMismatch("");
+    var cash = (payload && payload.cash) || {};
+    var bank = (payload && payload.bank) || {};
+    var cashTot = Number(cash.total) || 0;
+    var bankTot = Number(bank.total) || 0;
+    var cashLedgers = cash.ledgers || [];
+    var bankLedgers = bank.ledgers || [];
+    var movement = (payload && payload.movement) || [];
+    var movementByDay = payload.movementByDay || payload.movement_by_day || [];
+    setKpis([
+      { label: "Cash", value: money(cashTot) },
+      { label: "Bank", value: money(bankTot) },
+      { label: "Combined", value: money(cashTot + bankTot) },
+      { label: "Ledgers", value: String((cash.count || cashLedgers.length) + (bank.count || bankLedgers.length)) },
+      { label: "Movements", value: String(movement.length) }
+    ]);
+    setChartTitles("Cash vs bank", "Movement by day", "Top bank ledgers");
+    $("table-title").textContent = "Cash & bank ledgers · recent movement";
+    setChart("a", { type: "pie", labels: ["Cash", "Bank"], values: [cashTot, bankTot] });
+    lastTrend = {
+      labels: movementByDay.map(function (d) { return d.name; }),
+      values: movementByDay.map(function (d) { return Number(d.amount) || 0; }),
+      rotate: false
+    };
+    trendMode = "line";
+    applyTrendChart();
+    var topBank = bankLedgers.map(function (l) {
+      return { name: l.name, val: Math.abs(parseAmt(l.closingBalance || l.closing_balance)) };
+    }).filter(function (x) { return Number.isFinite(x.val); })
+      .sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
+    setChart("c", {
+      type: "bar",
+      labels: topBank.map(function (c) { return c.name.slice(0, 18); }),
+      values: topBank.map(function (c) { return c.val; }),
+      rotate: true
+    });
+    var ledgerRows = cashLedgers.concat(bankLedgers).map(function (l) {
+      return [l.name, l.parent || "—", money(parseAmt(l.closingBalance || l.closing_balance))];
+    });
+    var moveRows = movement.slice(0, 40).map(function (r) {
+      return [
+        normalizeDate(r.date) || (r.date || "—"),
+        r.voucherType || r.voucher_type || "—",
+        r.party || "—",
+        money(parseAmt(r.amount))
+      ];
+    });
+    var wrap = $("table-wrap");
+    var html = "";
+    if (ledgerRows.length) {
+      html += "<table><thead><tr><th>Ledger</th><th>Group</th><th>Balance</th></tr></thead><tbody>" +
+        ledgerRows.slice(0, 40).map(function (r) {
+          return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>";
+        }).join("") + "</tbody></table>";
+    }
+    if (moveRows.length) {
+      html += "<p style='margin:1rem 0 .4rem;font-size:.8rem;color:#64748b;font-weight:600'>Recent Payment / Receipt / Contra</p>";
+      html += "<table><thead><tr><th>Date</th><th>Type</th><th>Party</th><th>Amount</th></tr></thead><tbody>" +
+        moveRows.map(function (r) {
+          return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>";
+        }).join("") + "</tbody></table>";
+    }
+    wrap.innerHTML = html || '<p class="empty">No cash/bank rows in this window.</p>';
   }
 
   async function refresh() {
@@ -569,7 +817,8 @@ export function buildTallyLiveDashboardHtml(
         return;
       }
       var meta = st.meta || {};
-      var kind = focus === "outstanding" ? "outstanding" : focus === "trial_balance" ? "trial_balance" : "daybook";
+      var kind = focus;
+      if (["daybook", "outstanding", "trial_balance", "sales", "cash_bank"].indexOf(kind) < 0) kind = "daybook";
       var res = await request(kind, { fromDate: from, toDate: to, maxRows: 200 });
       if (!res.ok) {
         if (res.needsAllow) {
@@ -585,13 +834,14 @@ export function buildTallyLiveDashboardHtml(
       setStatus("Connected · " + where + (meta.company ? " · " + meta.company : "") + " · refreshed " + when);
       if (kind === "daybook") renderDaybook(res.data, from, to, meta);
       else if (kind === "outstanding") renderOutstanding(res.data, meta);
-      else renderTrial(res.data, meta);
+      else if (kind === "trial_balance") renderTrial(res.data, meta);
+      else if (kind === "sales") renderSales(res.data, meta);
+      else if (kind === "cash_bank") renderCashBank(res.data, meta);
     } catch (e) {
       setStatus(String(e && e.message ? e.message : e), "error");
     }
     btn.disabled = false;
-    if (chartMix) chartMix.resize();
-    if (chartTrend) chartTrend.resize();
+    resizeCharts();
   }
 
   document.querySelectorAll(".tab").forEach(function (tab) {
@@ -603,11 +853,17 @@ export function buildTallyLiveDashboardHtml(
       refresh();
     });
   });
-  $("refreshBtn").addEventListener("click", refresh);
-  window.addEventListener("resize", function () {
-    if (chartMix) chartMix.resize();
-    if (chartTrend) chartTrend.resize();
+  document.querySelectorAll(".preset").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      applyPreset(btn.getAttribute("data-preset") || "30d");
+    });
   });
+  $("trendToggle").addEventListener("click", function () {
+    trendMode = trendMode === "line" ? "bar" : "line";
+    applyTrendChart();
+  });
+  $("refreshBtn").addEventListener("click", refresh);
+  window.addEventListener("resize", resizeCharts);
   refresh();
 })();
   </script>

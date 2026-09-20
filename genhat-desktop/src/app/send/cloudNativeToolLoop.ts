@@ -33,6 +33,8 @@ import {
   executeTallyListLedgers,
   executeTallyLiveDashboard,
   executeTallyOutstanding,
+  executeTallySales,
+  executeTallyCashBank,
   executeTallyTrialBalance,
 } from "./tallyTools";
 import { executeAskFollowUp, type AskFollowUpArgs } from "./askFollowUp";
@@ -835,6 +837,22 @@ async function executeToolCall(
     return { content: JSON.stringify(result), webSearchResult };
   }
 
+  if (name === "tally_sales") {
+    const result = await executeTallySales(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
+  if (name === "tally_cash_bank") {
+    const result = await executeTallyCashBank(args, {
+      signal: opts.signal,
+      onStatus: opts.onToolStatus,
+    });
+    return { content: JSON.stringify(result), webSearchResult };
+  }
+
   if (name === "tally_live_dashboard") {
     const result = await executeTallyLiveDashboard(args, {
       signal: opts.signal,
@@ -977,6 +995,10 @@ function summarizeToolRound(toolCalls: CloudToolCall[]): string | null {
         return "Exporting day book";
       case "tally_outstanding":
         return "Exporting outstanding balances";
+      case "tally_sales":
+        return "Exporting Tally sales";
+      case "tally_cash_bank":
+        return "Exporting cash & bank";
       case "tally_live_dashboard":
         return "Opening live Tally dashboard";
       case "tally_export_excel":
@@ -1365,7 +1387,7 @@ export async function runCloudNativeToolLoop(
       if (privateMode) {
         parts.push(
           "You can read TallyPrime (localhost XML HTTP, read-only): " +
-            "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding. " +
+            "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding; tally_sales; tally_cash_bank. " +
             "Private mode is text-only — do NOT create Excel/HTML dashboards or file artifacts. " +
             "Answer with text summaries only. Tell the user to switch to Cloud for live dashboards or Excel exports. " +
             "Never invent balances."
@@ -1380,12 +1402,15 @@ export async function runCloudNativeToolLoop(
         : " If the user attaches an example Excel and asks for the same format, call tally_export_excel with match_template=true, template_path, and column_map.";
       parts.push(
         "You can read TallyPrime (localhost XML HTTP, read-only): " +
-          "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding; " +
-          "tally_live_dashboard (LIVE KPIs/charts that Refresh from Tally — use this for any dashboard/visualization); " +
+          "tally_status; tally_list_ledgers; tally_trial_balance; tally_daybook; tally_outstanding; tally_sales; tally_cash_bank; " +
+          "tally_live_dashboard (LIVE KPIs + pie/bar/line charts that Refresh from Tally — DEFAULT for any dashboard/visualization/report); " +
           "tally_export_excel (downloadable .xlsx with Raw/Pivot/Summary, or a sheet matching an attached example Excel). " +
-          "For a complete dashboard: call tally_live_dashboard ONCE (tabs already cover Day Book, Outstanding, Trial Balance). " +
+          "For a complete dashboard: call tally_live_dashboard ONCE and set focus to the right tab " +
+          "(daybook | sales | cash_bank | outstanding | trial_balance). Tabs already include multi-chart layouts. " +
+          "HYBRID: only when the user explicitly asks for a custom chart layout / unusual mix (e.g. “custom HTML with dual_line”), " +
+          "fetch via tally_* then call render_chart (mix chart_type) + compact generate_html — never invent figures. " +
           "Do NOT invent multiple HTML files or claim dashboards exist unless the tool returned ok=true with a path — chips appear automatically from tool results. " +
-          "Do NOT bake figures into generate_html. Do NOT pass Tally row arrays into generate_spreadsheet — use tally_export_excel instead. " +
+          "Do NOT bake figures into generate_html for standard dashboards. Do NOT pass Tally row arrays into generate_spreadsheet — use tally_export_excel instead. " +
           "Use tally_* exports for Q&A about specific balances. Never invent balances." +
           sheetNote
       );

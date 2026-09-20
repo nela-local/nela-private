@@ -415,6 +415,324 @@ pub async fn outstanding(max_rows: Option<usize>) -> Result<TallyOutstandingResu
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedAmount {
+    pub name: String,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TallySalesSummary {
+    pub total: f64,
+    pub voucher_count: usize,
+    pub party_count: usize,
+    pub by_day: Vec<NamedAmount>,
+    pub by_party: Vec<NamedAmount>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TallySalesResult {
+    pub ok: bool,
+    pub company: Option<String>,
+    pub from_date: Option<String>,
+    pub to_date: Option<String>,
+    pub lines: Vec<DaybookLine>,
+    pub summary: TallySalesSummary,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TallyCashBankBucket {
+    pub group: String,
+    pub total: f64,
+    pub ledgers: Vec<LedgerRow>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TallyCashBankResult {
+    pub ok: bool,
+    pub company: Option<String>,
+    pub from_date: Option<String>,
+    pub to_date: Option<String>,
+    pub cash: TallyCashBankBucket,
+    pub bank: TallyCashBankBucket,
+    /// Payment / Receipt / Contra vouchers in the date window (for movement charts).
+    pub movement: Vec<DaybookLine>,
+    pub movement_by_day: Vec<NamedAmount>,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+fn parse_amount_f64(raw: Option<&str>) -> f64 {
+    let Some(s) = raw.map(str::trim).filter(|t| !t.is_empty()) else {
+        return 0.0;
+    };
+    let cleaned: String = s.chars().filter(|c| *c != ',').collect();
+    if let Ok(n) = cleaned.parse::<f64>() {
+        return n;
+    }
+    // Multi-currency Tally text: "... = -₹ 2404333.80" (₹ may show as ?)
+    let focus = cleaned
+        .rsplit_once('=')
+        .map(|(_, r)| r.trim())
+        .unwrap_or(cleaned.as_str());
+    let mut num = String::new();
+    let mut started = false;
+    let mut seen_sign = false;
+    for ch in focus.chars() {
+        if !started {
+            if ch == '-' || ch == '+' {
+                if seen_sign {
+                    continue;
+                }
+                num.push(ch);
+                seen_sign = true;
+                continue;
+            }
+            if ch.is_ascii_digit() {
+                num.push(ch);
+                started = true;
+            }
+            continue;
+        }
+        if ch.is_ascii_digit() || ch == '.' {
+            num.push(ch);
+        } else {
+            break;
+        }
+    }
+    num.parse::<f64>().unwrap_or(0.0)
+}
+
+fn normalize_day_key(raw: Option<&str>) -> String {
+    let Some(s) = raw.map(str::trim).filter(|t| !t.is_empty()) else {
+        return "unknown".into();
+    };
+    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() >= 8 {
+        let d = &digits[..8];
+        return format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]);
+    }
+    if s.len() >= 10 && s.as_bytes().get(4) == Some(&b'-') {
+        return s[..10].to_string();
+    }
+    s.to_string()
+}
+
+fn aggregate_named(map: &std::collections::BTreeMap<String, f64>, limit: usize) -> Vec<NamedAmount> {
+    let mut items: Vec<NamedAmount> = map
+        .iter()
+        .map(|(name, amount)| NamedAmount {
+            name: name.clone(),
+            amount: *amount,
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        b.amount
+            .partial_cmp(&a.amount)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    items.truncate(limit);
+    items
+}
+
+fn summarize_sales_lines(lines: &[DaybookLine]) -> TallySalesSummary {
+    use std::collections::{BTreeMap, HashSet};
+    let mut total = 0.0;
+    let mut by_day: BTreeMap<String, f64> = BTreeMap::new();
+    let mut by_party: BTreeMap<String, f64> = BTreeMap::new();
+    let mut parties: HashSet<String> = HashSet::new();
+    for line in lines {
+        let amt = parse_amount_f64(line.amount.as_deref()).abs();
+        total += amt;
+        let day = normalize_day_key(line.date.as_deref());
+        *by_day.entry(day).or_insert(0.0) += amt;
+        let party = line
+            .party
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Unknown")
+            .to_string();
+        parties.insert(party.clone());
+        *by_party.entry(party).or_insert(0.0) += amt;
+    }
+    let by_day_vec: Vec<NamedAmount> = by_day
+        .into_iter()
+        .map(|(name, amount)| NamedAmount { name, amount })
+        .collect();
+    let by_party_vec = aggregate_named(&by_party, 20);
+    TallySalesSummary {
+        total,
+        voucher_count: lines.len(),
+        party_count: parties.len(),
+        by_day: by_day_vec,
+        by_party: by_party_vec,
+    }
+}
+
+fn bucket_from_ledgers(group: &str, ledgers: Vec<LedgerRow>) -> TallyCashBankBucket {
+    let total: f64 = ledgers
+        .iter()
+        .map(|l| parse_amount_f64(l.closing_balance.as_deref()).abs())
+        .sum();
+    let count = ledgers.len();
+    TallyCashBankBucket {
+        group: group.to_string(),
+        total,
+        ledgers,
+        count,
+    }
+}
+
+fn is_cash_movement_type(vtype: Option<&str>) -> bool {
+    let Some(t) = vtype.map(|s| s.trim().to_ascii_lowercase()) else {
+        return false;
+    };
+    t == "payment" || t == "receipt" || t == "contra"
+}
+
+/// Sales vouchers for a period with by-day / by-party summaries.
+pub async fn sales(
+    from_date: Option<String>,
+    to_date: Option<String>,
+    max_rows: Option<usize>,
+) -> Result<TallySalesResult, String> {
+    let cfg = cfg_or_err()?;
+    let cap = max_rows.unwrap_or(200).clamp(1, 5000);
+    let from = from_date.filter(|s| !s.trim().is_empty());
+    let to = to_date.filter(|s| !s.trim().is_empty());
+    let xml = build_daybook_export(
+        cfg.company.as_deref(),
+        from.as_deref(),
+        to.as_deref(),
+        Some("Sales"),
+    );
+    match tally_http_post(&cfg.host, cfg.port, &xml).await {
+        Ok(body) => {
+            let (lines, truncated) = parse_daybook(&body, cap);
+            let summary = summarize_sales_lines(&lines);
+            Ok(TallySalesResult {
+                ok: true,
+                company: cfg.company,
+                from_date: from,
+                to_date: to,
+                lines,
+                summary,
+                truncated,
+                error: None,
+            })
+        }
+        Err(e) => Ok(TallySalesResult {
+            ok: false,
+            company: cfg.company,
+            from_date: from,
+            to_date: to,
+            lines: vec![],
+            summary: TallySalesSummary {
+                total: 0.0,
+                voucher_count: 0,
+                party_count: 0,
+                by_day: vec![],
+                by_party: vec![],
+            },
+            truncated: false,
+            error: Some(e),
+        }),
+    }
+}
+
+/// Cash-in-Hand + Bank Accounts balances, plus Payment/Receipt/Contra movement.
+pub async fn cash_bank(
+    from_date: Option<String>,
+    to_date: Option<String>,
+    max_rows: Option<usize>,
+) -> Result<TallyCashBankResult, String> {
+    let cfg = cfg_or_err()?;
+    let cap = max_rows.unwrap_or(100).clamp(1, 5000);
+    let from = from_date.filter(|s| !s.trim().is_empty());
+    let to = to_date.filter(|s| !s.trim().is_empty());
+
+    let cash_xml = build_list_ledgers_export(cfg.company.as_deref(), Some("Cash-in-Hand"));
+    let bank_xml = build_list_ledgers_export(cfg.company.as_deref(), Some("Bank Accounts"));
+    let daybook_xml = build_daybook_export(
+        cfg.company.as_deref(),
+        from.as_deref(),
+        to.as_deref(),
+        None,
+    );
+
+    let cash_body = tally_http_post(&cfg.host, cfg.port, &cash_xml).await;
+    let bank_body = tally_http_post(&cfg.host, cfg.port, &bank_xml).await;
+    let daybook_body = tally_http_post(&cfg.host, cfg.port, &daybook_xml).await;
+
+    match (cash_body, bank_body, daybook_body) {
+        (Ok(c), Ok(b), Ok(d)) => {
+            let (cash_ledgers, _) = parse_ledgers(&c, cap);
+            let (bank_ledgers, _) = parse_ledgers(&b, cap);
+            let (all_lines, truncated) = parse_daybook(&d, cap.max(200));
+            let movement: Vec<DaybookLine> = all_lines
+                .into_iter()
+                .filter(|l| is_cash_movement_type(l.voucher_type.as_deref()))
+                .collect();
+            let mut by_day: std::collections::BTreeMap<String, f64> =
+                std::collections::BTreeMap::new();
+            for line in &movement {
+                let amt = parse_amount_f64(line.amount.as_deref()).abs();
+                let day = normalize_day_key(line.date.as_deref());
+                *by_day.entry(day).or_insert(0.0) += amt;
+            }
+            let movement_by_day: Vec<NamedAmount> = by_day
+                .into_iter()
+                .map(|(name, amount)| NamedAmount { name, amount })
+                .collect();
+            Ok(TallyCashBankResult {
+                ok: true,
+                company: cfg.company,
+                from_date: from,
+                to_date: to,
+                cash: bucket_from_ledgers("Cash-in-Hand", cash_ledgers),
+                bank: bucket_from_ledgers("Bank Accounts", bank_ledgers),
+                movement,
+                movement_by_day,
+                truncated,
+                error: None,
+            })
+        }
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Ok(TallyCashBankResult {
+            ok: false,
+            company: cfg.company,
+            from_date: from,
+            to_date: to,
+            cash: TallyCashBankBucket {
+                group: "Cash-in-Hand".into(),
+                total: 0.0,
+                ledgers: vec![],
+                count: 0,
+            },
+            bank: TallyCashBankBucket {
+                group: "Bank Accounts".into(),
+                total: 0.0,
+                ledgers: vec![],
+                count: 0,
+            },
+            movement: vec![],
+            movement_by_day: vec![],
+            truncated: false,
+            error: Some(e),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +955,59 @@ mod tests {
         let (lines, _) = parse_daybook(fixture, 100);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].voucher_type.as_deref(), Some("Sales"));
+    }
+
+    #[test]
+    fn summarizes_sales_by_day_and_party() {
+        let lines = vec![
+            DaybookLine {
+                date: Some("20260401".into()),
+                voucher_type: Some("Sales".into()),
+                party: Some("Acme".into()),
+                amount: Some("10000".into()),
+                narration: None,
+            },
+            DaybookLine {
+                date: Some("20260401".into()),
+                voucher_type: Some("Sales".into()),
+                party: Some("Beta".into()),
+                amount: Some("5000".into()),
+                narration: None,
+            },
+            DaybookLine {
+                date: Some("20260402".into()),
+                voucher_type: Some("Sales".into()),
+                party: Some("Acme".into()),
+                amount: Some("2000".into()),
+                narration: None,
+            },
+        ];
+        let summary = summarize_sales_lines(&lines);
+        assert_eq!(summary.voucher_count, 3);
+        assert_eq!(summary.party_count, 2);
+        assert!((summary.total - 17000.0).abs() < 0.01);
+        assert_eq!(summary.by_day.len(), 2);
+        assert_eq!(summary.by_day[0].name, "2026-04-01");
+        assert!((summary.by_day[0].amount - 15000.0).abs() < 0.01);
+        assert_eq!(summary.by_party[0].name, "Acme");
+        assert!((summary.by_party[0].amount - 12000.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn detects_cash_movement_voucher_types() {
+        assert!(is_cash_movement_type(Some("Payment")));
+        assert!(is_cash_movement_type(Some("Receipt")));
+        assert!(is_cash_movement_type(Some("Contra")));
+        assert!(!is_cash_movement_type(Some("Sales")));
+        assert!(!is_cash_movement_type(None));
+    }
+
+    #[test]
+    fn parses_amount_with_multicurrency_suffix() {
+        assert!((parse_amount_f64(Some("10000.50")) - 10000.50).abs() < 0.01);
+        assert!(
+            (parse_amount_f64(Some("-$44524.70 @ ? 54/$ = -? 2404333.80")).abs() - 2404333.80).abs()
+                < 0.01
+        );
     }
 }

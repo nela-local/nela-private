@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildTallyLiveDashboardHtml,
   toInputDate,
+  normalizeTallyLiveFocus,
   NELA_TALLY_REQUEST,
   NELA_TALLY_RESPONSE,
 } from "./tallyLiveDashboard.js";
@@ -30,9 +31,32 @@ describe("tallyLiveDashboard", () => {
     assert.match(html, /QUADRAGEN/);
   });
 
-  it("normalizes input dates", () => {
+  it("includes five tabs, period presets, and three chart hosts", () => {
+    const html = buildTallyLiveDashboardHtml({ focus: "sales" });
+    assert.match(html, /data-focus="sales"/);
+    assert.match(html, /data-focus="daybook"/);
+    assert.match(html, /data-focus="cash_bank"/);
+    assert.match(html, /data-focus="outstanding"/);
+    assert.match(html, /data-focus="trial_balance"/);
+    assert.match(html, /data-preset="7d"/);
+    assert.match(html, /data-preset="mtd"/);
+    assert.match(html, /data-preset="fy"/);
+    assert.match(html, /id="chart-a"/);
+    assert.match(html, /id="chart-b"/);
+    assert.match(html, /id="chart-c"/);
+    assert.match(html, /id="trendToggle"/);
+    assert.match(html, /function setChart/);
+    assert.match(html, /grouped_bar/);
+    assert.match(html, /type === "line"/);
+    assert.match(html, /renderSales/);
+    assert.match(html, /renderCashBank/);
+  });
+
+  it("normalizes input dates and focuses", () => {
     assert.equal(toInputDate("20100601"), "2010-06-01");
     assert.equal(toInputDate("2010-07-31"), "2010-07-31");
     assert.equal(toInputDate(""), "");
+    assert.equal(normalizeTallyLiveFocus("cash_bank"), "cash_bank");
+    assert.equal(normalizeTallyLiveFocus("Sales"), "sales");
   });
 });

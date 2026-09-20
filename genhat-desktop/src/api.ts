@@ -1705,6 +1705,90 @@ export const Api = {
       maxRows: input?.maxRows ?? null,
     });
   },
+
+  async tallySales(input?: {
+    fromDate?: string | null;
+    toDate?: string | null;
+    maxRows?: number | null;
+  }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    fromDate?: string | null;
+    toDate?: string | null;
+    lines: Array<{
+      date?: string | null;
+      voucherType?: string | null;
+      party?: string | null;
+      amount?: string | null;
+      narration?: string | null;
+    }>;
+    summary: {
+      total: number;
+      voucherCount: number;
+      partyCount: number;
+      byDay: Array<{ name: string; amount: number }>;
+      byParty: Array<{ name: string; amount: number }>;
+    };
+    truncated: boolean;
+    error?: string | null;
+  }> {
+    return invoke("tally_sales", {
+      fromDate: input?.fromDate ?? null,
+      toDate: input?.toDate ?? null,
+      maxRows: input?.maxRows ?? null,
+    });
+  },
+
+  async tallyCashBank(input?: {
+    fromDate?: string | null;
+    toDate?: string | null;
+    maxRows?: number | null;
+  }): Promise<{
+    ok: boolean;
+    company?: string | null;
+    fromDate?: string | null;
+    toDate?: string | null;
+    cash: {
+      group: string;
+      total: number;
+      count: number;
+      ledgers: Array<{
+        name: string;
+        parent?: string | null;
+        closingBalance?: string | null;
+        debit?: string | null;
+        credit?: string | null;
+      }>;
+    };
+    bank: {
+      group: string;
+      total: number;
+      count: number;
+      ledgers: Array<{
+        name: string;
+        parent?: string | null;
+        closingBalance?: string | null;
+        debit?: string | null;
+        credit?: string | null;
+      }>;
+    };
+    movement: Array<{
+      date?: string | null;
+      voucherType?: string | null;
+      party?: string | null;
+      amount?: string | null;
+      narration?: string | null;
+    }>;
+    movementByDay: Array<{ name: string; amount: number }>;
+    truncated: boolean;
+    error?: string | null;
+  }> {
+    return invoke("tally_cash_bank", {
+      fromDate: input?.fromDate ?? null,
+      toDate: input?.toDate ?? null,
+      maxRows: input?.maxRows ?? null,
+    });
+  },
 };
 
 // ── Playground / Pipeline commands ─────────────────────────────────────────────

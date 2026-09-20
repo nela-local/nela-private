@@ -1,8 +1,8 @@
 //! Tally connector Tauri commands (read-only localhost XML HTTP).
 
 use crate::connectors::tally::{
-    self, TallyDaybookResult, TallyLedgersResult, TallyOutstandingResult, TallyScanResult,
-    TallyStatus, TallyTrialBalanceResult,
+    self, TallyCashBankResult, TallyDaybookResult, TallyLedgersResult, TallyOutstandingResult,
+    TallySalesResult, TallyScanResult, TallyStatus, TallyTrialBalanceResult,
 };
 use tauri::{AppHandle, Manager};
 
@@ -95,4 +95,26 @@ pub async fn tally_outstanding(
 ) -> Result<TallyOutstandingResult, String> {
     bind_app_data(&app)?;
     tally::outstanding(max_rows).await
+}
+
+#[tauri::command]
+pub async fn tally_sales(
+    app: AppHandle,
+    from_date: Option<String>,
+    to_date: Option<String>,
+    max_rows: Option<usize>,
+) -> Result<TallySalesResult, String> {
+    bind_app_data(&app)?;
+    tally::sales(from_date, to_date, max_rows).await
+}
+
+#[tauri::command]
+pub async fn tally_cash_bank(
+    app: AppHandle,
+    from_date: Option<String>,
+    to_date: Option<String>,
+    max_rows: Option<usize>,
+) -> Result<TallyCashBankResult, String> {
+    bind_app_data(&app)?;
+    tally::cash_bank(from_date, to_date, max_rows).await
 }

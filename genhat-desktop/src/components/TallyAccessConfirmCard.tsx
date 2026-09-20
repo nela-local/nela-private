@@ -27,11 +27,15 @@ export default function TallyAccessConfirmCard() {
         ? "Trial balance"
         : request.kind === "daybook"
           ? "Day book"
-          : request.kind === "live_dashboard"
-            ? "Live dashboard (ongoing refresh)"
-            : request.kind === "export_excel"
-              ? "Excel export"
-              : "Outstanding (debtors/creditors)";
+          : request.kind === "sales"
+            ? "Sales"
+            : request.kind === "cash_bank"
+              ? "Cash & bank"
+              : request.kind === "live_dashboard"
+                ? "Live dashboard (ongoing refresh)"
+                : request.kind === "export_excel"
+                  ? "Excel export"
+                  : "Outstanding (debtors/creditors)";
 
   const details: string[] = [];
   if (request.group) details.push(`Group: ${request.group}`);
