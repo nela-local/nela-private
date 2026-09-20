@@ -177,6 +177,15 @@ async function downloadHtmlDocumentArtifact(
     const selection = resolveTallySelection(options);
     const { html: exportHtml, snapshot, title } =
       await materializeTallyDashboardSnapshot(html, selection);
+    // Keep a local sidecar so gallery/offline can reuse the last good snapshot.
+    try {
+      const { writeTallySnapshotCache } = await import(
+        "./tallyDashboardSnapshotCache"
+      );
+      await writeTallySnapshotCache(sourcePath, exportHtml);
+    } catch {
+      /* cache is best-effort */
+    }
     const defaultName = tallySnapshotFileBase({
       company: snapshot.company || selection.company,
       fromDate: snapshot.fromDate,
@@ -245,6 +254,14 @@ export async function exportArtifactDocx(
     const selection = resolveTallySelection(options);
     const materialized = await materializeTallyDashboardSnapshot(html, selection);
     html = materialized.html;
+    try {
+      const { writeTallySnapshotCache } = await import(
+        "./tallyDashboardSnapshotCache"
+      );
+      await writeTallySnapshotCache(htmlPath, html);
+    } catch {
+      /* cache is best-effort */
+    }
     defaultBase = tallySnapshotFileBase({
       company: materialized.snapshot.company || selection.company,
       fromDate: materialized.snapshot.fromDate,

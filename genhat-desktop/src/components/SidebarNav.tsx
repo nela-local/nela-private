@@ -106,7 +106,7 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
       </button>
       <button
         className={`flex flex-col items-center gap-1 px-2 py-2 rounded-lg transition-colors ${selected === "artifacts" ? "bg-neon-subtle text-neon" : "text-txt-secondary hover:text-neon"}`}
-        title="Dashboards & artifacts"
+        title="Dashboards"
         onClick={() => onSelect("artifacts")}
         data-tour="sidebar-artifacts"
       >

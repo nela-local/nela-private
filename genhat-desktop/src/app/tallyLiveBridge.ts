@@ -1,5 +1,6 @@
 /**
  * Host bridge: artifact iframe postMessage → Api.tally* → response.
+ * Also caches successful live report payloads so offline can show last-seen data.
  */
 
 import { Api } from "../api";
@@ -15,6 +16,7 @@ import {
   isTallyLiveSelectionMessage,
   setTallyLiveSelection,
 } from "./tallyLiveSelection";
+import { recordLiveTallyReportSuccess } from "./tallyDashboardSnapshotCache";
 
 function isTallyLiveRequest(data: unknown): data is TallyLiveRequestMessage {
   if (!data || typeof data !== "object") return false;
@@ -54,6 +56,22 @@ async function runKind(
     default:
       throw new Error(`Unknown Tally live kind: ${kind}`);
   }
+}
+
+function isDisconnectError(
+  connected: boolean | undefined,
+  error: string | null | undefined
+): boolean {
+  if (connected === false) return true;
+  const msg = (error || "").toLowerCase();
+  return (
+    msg.includes("not connected") ||
+    msg.includes("tally is not connected") ||
+    msg.includes("could not reach") ||
+    msg.includes("timed out") ||
+    msg.includes("connection refused") ||
+    msg.includes("econnrefused")
+  );
 }
 
 /**
@@ -170,10 +188,30 @@ export async function handleTallyLiveRequest(
   }
 }
 
+export type TallyLiveBridgeOptions = {
+  /** Live dashboard artifact path — used to cache last-shown report data. */
+  artifactPath?: string | null;
+  /** Live shell HTML (for title / default dates when building the snapshot). */
+  liveHtml?: string | null;
+  /** Fired when Tally is unreachable / disconnected (after a failed live request). */
+  onDisconnected?: (info: { error?: string | null }) => void;
+  /** Fired after a static snapshot was written from live report data. */
+  onSnapshotCached?: (staticHtml: string) => void;
+};
+
 /** Attach a window message listener that bridges Tally live requests to a target iframe. */
 export function attachTallyLiveBridge(
-  getTargetWindow: () => Window | null | undefined
+  getTargetWindow: () => Window | null | undefined,
+  options?: TallyLiveBridgeOptions
 ): () => void {
+  let disconnectNotified = false;
+
+  const notifyDisconnected = (error?: string | null) => {
+    if (disconnectNotified) return;
+    disconnectNotified = true;
+    options?.onDisconnected?.({ error });
+  };
+
   const onMessage = (ev: MessageEvent) => {
     if (isTallyLiveSelectionMessage(ev.data)) {
       setTallyLiveSelection({
@@ -187,6 +225,44 @@ export function attachTallyLiveBridge(
     void (async () => {
       const response = await handleTallyLiveRequest(ev.data);
       if (!response) return;
+
+      const path = options?.artifactPath?.trim();
+      if (
+        path &&
+        response.ok &&
+        (response.kind === "daybook" ||
+          response.kind === "outstanding" ||
+          response.kind === "trial_balance")
+      ) {
+        disconnectNotified = false;
+        const focus =
+          response.kind === "daybook" ||
+          response.kind === "outstanding" ||
+          response.kind === "trial_balance"
+            ? response.kind
+            : undefined;
+        const req = isTallyLiveRequest(ev.data) ? ev.data : null;
+        void recordLiveTallyReportSuccess({
+          artifactPath: path,
+          liveHtml: options?.liveHtml,
+          kind: response.kind,
+          data: response.data,
+          meta: response.meta,
+          fromDate: req?.fromDate,
+          toDate: req?.toDate,
+          focus,
+        }).then((html) => {
+          if (html) options?.onSnapshotCached?.(html);
+        });
+      }
+
+      if (
+        !response.ok &&
+        isDisconnectError(response.meta?.connected, response.error)
+      ) {
+        notifyDisconnected(response.error);
+      }
+
       try {
         const win = getTargetWindow();
         win?.postMessage(response, "*");

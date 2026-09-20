@@ -10,7 +10,6 @@ import ChatHistorySidebar from "./components/ChatHistorySidebar";
 import SidebarNav from "./components/SidebarNav";
 import AudioSidebar from "./components/AudioSidebar";
 import MindmapsSidebar from "./components/MindmapsSidebar";
-import ArtifactsSidebar from "./components/ArtifactsSidebar";
 import PlaygroundSidebar from "./components/PlaygroundSidebar";
 import StartupModelToast from "./components/StartupModelToast";
 import AppUpdateToast from "./components/AppUpdateToast";
@@ -216,16 +215,15 @@ function App() {
           onToggleTheme={toggleTheme}
         />
 
-        {sidebarSection === null && (
+        {(sidebarSection === null || sidebarSection === "artifacts") && (
           <div className="w-1 min-w-1 h-full bg-neon rounded-full mx-1 shadow-[0_0_16px_#00d4ff88] transition-all duration-200 opacity-100" />
         )}
 
-        {sidebarSection !== null && (
+        {sidebarSection !== null && sidebarSection !== "artifacts" && (
           <>
             {sidebarSection === "chats" && <ChatHistorySidebar />}
             {sidebarSection === "audio" && <AudioSidebar />}
             {sidebarSection === "mindmaps" && <MindmapsSidebar />}
-            {sidebarSection === "artifacts" && <ArtifactsSidebar />}
             {sidebarSection === "playground" && (
               <PlaygroundSidebar
                 onOpen={() => {
