@@ -202,6 +202,7 @@ export async function executeHandleSend(
   const ctrl = new AbortController();
   ctx.abortControllersRef.current.set(sid, ctrl);
 
+  try {
   let resolvedIntentKind = slashFileSearch ? "FileSearch" : "";
   const artifactOptions = {
     webEnabled: effectiveWebEnabled,
@@ -418,7 +419,6 @@ export async function executeHandleSend(
       resolvedIntentKind,
       slashFileSearch
     );
-
   } catch (err) {
     if (ctx.generalIntervalRef.current) clearInterval(ctx.generalIntervalRef.current);
     ctx.setGeneralGenerating(false);
@@ -430,5 +430,8 @@ export async function executeHandleSend(
       ],
       loading: false,
     }));
+  }
+  } finally {
+    ctx.abortControllersRef.current.delete(sid);
   }
 }

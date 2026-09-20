@@ -7,6 +7,13 @@ use crate::connectors::tally::{
 use tauri::{AppHandle, Manager};
 
 fn bind_app_data(app: &AppHandle) -> Result<(), String> {
+    // Prefer active workspace cache so Tally config never spills across workspaces.
+    if let Some(ws) = app.try_state::<crate::commands::workspace::WorkspaceState>() {
+        if let Ok(dir) = ws.0.active_connectors_root() {
+            tally::set_app_data_dir(dir);
+            return Ok(());
+        }
+    }
     let dir = app
         .path()
         .app_data_dir()

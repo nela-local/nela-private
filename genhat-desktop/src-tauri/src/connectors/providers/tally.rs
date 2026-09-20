@@ -13,6 +13,12 @@ use tauri::{AppHandle, Manager};
 pub struct TallyBackend;
 
 fn bind_app_data(app: &AppHandle) -> Result<(), ConnectorError> {
+    if let Some(ws) = app.try_state::<crate::commands::workspace::WorkspaceState>() {
+        if let Ok(dir) = ws.0.active_connectors_root() {
+            tally::set_app_data_dir(dir);
+            return Ok(());
+        }
+    }
     let dir = app
         .path()
         .app_data_dir()

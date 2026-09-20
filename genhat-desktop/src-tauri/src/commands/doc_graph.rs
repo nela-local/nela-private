@@ -15,7 +15,7 @@ pub async fn start_indexing_directory(
     state: State<'_, DocGraphState>,
     path: String,
 ) -> Result<PipelineReport, String> {
-    let engine = state.0.clone();
+    let engine = state.engine();
     if !engine.try_begin_indexing() {
         return Err("Indexing already in progress".into());
     }
@@ -81,7 +81,7 @@ pub async fn query_knowledge_base(
     query: String,
     top_k: Option<usize>,
 ) -> Result<String, String> {
-    let engine = state.0.clone();
+    let engine = state.engine();
     let q = query.trim().to_string();
     if q.is_empty() {
         return Err("Query must not be empty".into());
@@ -100,17 +100,17 @@ pub async fn query_knowledge_base(
 pub async fn get_knowledge_base_stats(
     state: State<'_, DocGraphState>,
 ) -> Result<KnowledgeBaseStats, String> {
-    Ok(state.0.stats())
+    Ok(state.engine().stats())
 }
 
 #[tauri::command]
 pub async fn get_background_index_status(
     state: State<'_, DocGraphState>,
 ) -> Result<BackgroundIndexStatus, String> {
-    Ok(state.0.background_status())
+    Ok(state.engine().background_status())
 }
 
 #[tauri::command]
 pub async fn clear_knowledge_base(state: State<'_, DocGraphState>) -> Result<(), String> {
-    state.0.clear().map_err(|e| e.to_string())
+    state.engine().clear().map_err(|e| e.to_string())
 }

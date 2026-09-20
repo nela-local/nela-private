@@ -1,7 +1,29 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Dispatch, SetStateAction } from "react";
 import { Api } from "../api";
-import { clearLlamaSlots } from "./llamaSlotAffinity";
+import { releaseLlamaSlotsForWorkspaceExcept } from "./llamaSlotAffinity";
+import { useArtifactStreamStore } from "../stores/artifactStreamStore";
+import { useChatModeStore } from "../stores/chatModeStore";
+import { abortControllers, useSessionStore } from "../stores/sessionStore";
+import { useWorkspaceStore } from "../stores/workspaceStore";
+import { parkGeneratingSession } from "./backgroundGenerationPark";
+import { cancelFollowUp } from "../stores/followUpStore";
+import {
+  cancelTallyAccessConfirm,
+  clearTallySessionTrust,
+} from "../stores/tallyAccessConfirmStore";
+import { clearTallyLiveSelection } from "./tallyLiveSelection";
+import { clearTallyLiveDrafts } from "./tallyDashboardSnapshotCache";
+import { useTallyStore } from "../stores/tallyStore";
+import { useConnectorStore } from "../stores/connectorStore";
+import { cancelGmailReadConfirm } from "../stores/gmailReadConfirmStore";
+import { cancelGmailSendConfirm } from "../stores/gmailSendConfirmStore";
+import { useGmailConnectPromptStore } from "../stores/gmailConnectPromptStore";
+import { cancelDriveAccessConfirm } from "../stores/driveAccessConfirmStore";
+import { useDriveConnectPromptStore } from "../stores/driveConnectPromptStore";
+import { cancelTelegramReadConfirm } from "../stores/telegramReadConfirmStore";
+import { cancelTelegramSendConfirm } from "../stores/telegramSendConfirmStore";
+import { useTelegramConnectPromptStore } from "../stores/telegramConnectPromptStore";
 import type {
   ChatSession,
   IngestionStatus,
@@ -75,6 +97,29 @@ export interface WorkspaceMutationContext {
 }
 
 function resetSessionState(ctx: WorkspaceMutationContext): void {
+  // Park in-flight generations so they finish in the background for the
+  // workspace they started in — do not abort.
+  const leavingWorkspaceId = useWorkspaceStore.getState().activeWorkspace?.id;
+  const liveSessions = useSessionStore.getState().sessions;
+  if (leavingWorkspaceId) {
+    for (const session of liveSessions) {
+      const ctrl = abortControllers.get(session.id);
+      const stillRunning =
+        session.loading || Boolean(ctrl && !ctrl.signal.aborted);
+      if (stillRunning) {
+        parkGeneratingSession(leavingWorkspaceId, session);
+      }
+    }
+    releaseLlamaSlotsForWorkspaceExcept(
+      leavingWorkspaceId,
+      new Set(
+        [...abortControllers.entries()]
+          .filter(([, ctrl]) => !ctrl.signal.aborted)
+          .map(([id]) => id)
+      )
+    );
+  }
+
   ctx.setSessionStoreReady(false);
   ctx.setRagDocs([]);
   ctx.setSessions([]);
@@ -82,8 +127,41 @@ function resetSessionState(ctx: WorkspaceMutationContext): void {
   ctx.setActiveSessionId("");
   ctx.setMindmapsBySession({});
   ctx.setActiveMindmapOverlay(null);
-  // Drop all KV-slot affinities so the next workspace gets fresh contexts.
-  clearLlamaSlots();
+  useSessionStore.getState().setStreamingThinking("");
+
+  // Composer / stream / confirm state must not spill into the next workspace.
+  const chatMode = useChatModeStore.getState();
+  chatMode.clearDirectDocuments();
+  chatMode.clearImage();
+  chatMode.setGeneralGenerating(false);
+  chatMode.setTtsGenerating(false);
+  useArtifactStreamStore.getState().clear();
+  cancelFollowUp();
+  cancelTallyAccessConfirm();
+  clearTallySessionTrust();
+  clearTallyLiveSelection();
+  clearTallyLiveDrafts();
+  // Drop in-memory Tally UI until the new workspace config is rebound + refreshed.
+  useTallyStore.setState({
+    connected: false,
+    wizardOpen: false,
+    error: null,
+    loading: false,
+    scanning: false,
+  });
+  cancelGmailReadConfirm();
+  cancelGmailSendConfirm();
+  useGmailConnectPromptStore.getState().hide();
+  cancelDriveAccessConfirm();
+  useDriveConnectPromptStore.getState().hide();
+  cancelTelegramReadConfirm();
+  cancelTelegramSendConfirm();
+  useTelegramConnectPromptStore.getState().hide();
+}
+
+function hydrateWorkspaceScopedStores(): void {
+  void useTallyStore.getState().refresh();
+  void useConnectorStore.getState().refresh();
 }
 
 export async function switchWorkspaceByIdAction(
@@ -100,6 +178,7 @@ export async function switchWorkspaceByIdAction(
     ctx.setWorkspaceScope(scope || `workspace:${opened.id}`);
     await ctx.refreshWorkspaceRegistry();
     await ctx.loadRagDocs();
+    hydrateWorkspaceScopedStores();
   } catch (err) {
     console.error("Failed to switch workspace:", err);
     ctx.setSessionStoreReady(true);
@@ -121,6 +200,7 @@ export async function createNewWorkspaceAction(
     ctx.setWorkspaceScope(scope || `workspace:${created.id}`);
     await ctx.refreshWorkspaceRegistry();
     await ctx.loadRagDocs();
+    hydrateWorkspaceScopedStores();
   } catch (err) {
     console.error("Failed to create workspace:", err);
     ctx.setSessionStoreReady(true);
@@ -213,6 +293,7 @@ export async function openWorkspaceFromFileAction(
     ctx.setWorkspaceScope(scope || `workspace:${result.workspace.id}`);
     await ctx.refreshWorkspaceRegistry();
     await ctx.loadRagDocs();
+    hydrateWorkspaceScopedStores();
   } catch (err) {
     console.error("Failed to open .nela workspace:", err);
     ctx.setSessionStoreReady(true);
@@ -296,6 +377,7 @@ export async function deleteWorkspaceByIdAction(
       ctx.setWorkspaceScope(scope || `workspace:${nextActiveFromBackend.id}`);
       await ctx.refreshWorkspaceRegistry();
       await ctx.loadRagDocs();
+      hydrateWorkspaceScopedStores();
     } else {
       ctx.setActiveWorkspace(null);
       ctx.setStartupContinueWorkspace(null);

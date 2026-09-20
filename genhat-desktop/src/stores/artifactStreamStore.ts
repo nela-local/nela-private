@@ -61,21 +61,28 @@ export const useArtifactStreamStore = create<
       active: true,
     }),
   setCsv: (csv, title) =>
-    set({
-      type: "text/csv",
-      csv,
-      title: title || "",
-      chars: csv.length,
-      sheetsSeen: countCsvSheets(csv),
-      active: true,
+    set((state) => {
+      // Ignore late tokens after a workspace switch cleared the stream.
+      if (!state.active) return state;
+      return {
+        type: "text/csv" as const,
+        csv,
+        title: title || "",
+        chars: csv.length,
+        sheetsSeen: countCsvSheets(csv),
+        active: true,
+      };
     }),
   setHtml: (html, title) =>
-    set({
-      type: "text/html",
-      html,
-      title: title || "",
-      chars: html.length,
-      active: true,
+    set((state) => {
+      if (!state.active) return state;
+      return {
+        type: "text/html" as const,
+        html,
+        title: title || "",
+        chars: html.length,
+        active: true,
+      };
     }),
   clear: () => set(empty),
 }));

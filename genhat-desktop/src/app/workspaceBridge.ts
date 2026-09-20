@@ -237,8 +237,11 @@ export async function hydrateSessionFromBackend(sessionId: string): Promise<bool
   if (current.title === "New Chat") return false;
 
   try {
-    const raw = await Api.getWorkspaceFrontendState();
+    const workspaceId = useWorkspaceStore.getState().activeWorkspace?.id;
+    if (!workspaceId) return false;
+    const raw = await Api.getWorkspaceFrontendState(workspaceId);
     if (!raw) return false;
+    if (useWorkspaceStore.getState().activeWorkspace?.id !== workspaceId) return false;
     const parsed = JSON.parse(raw) as { sessions?: Partial<ChatSession>[] };
     const found = Array.isArray(parsed.sessions)
       ? parsed.sessions.find((s) => s?.id === sessionId)

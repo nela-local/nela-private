@@ -308,7 +308,13 @@ impl WorkspaceManager {
 
     pub fn get_active_frontend_state(&self) -> Result<Option<String>, String> {
         let active = self.get_active_workspace()?;
-        let path = PathBuf::from(active.cache_dir).join("frontend_state.json");
+        self.get_frontend_state(&active.id)
+    }
+
+    /// Read frontend state for a specific workspace (isolation-safe; no active-id race).
+    pub fn get_frontend_state(&self, workspace_id: &str) -> Result<Option<String>, String> {
+        let cache_dir = self.get_workspace_cache_dir(workspace_id)?;
+        let path = cache_dir.join("frontend_state.json");
         if !path.exists() {
             return Ok(None);
         }
@@ -319,13 +325,43 @@ impl WorkspaceManager {
 
     pub fn save_active_frontend_state(&self, frontend_state_json: &str) -> Result<(), String> {
         let active = self.get_active_workspace()?;
-        let path = PathBuf::from(active.cache_dir).join("frontend_state.json");
+        self.save_frontend_state(&active.id, frontend_state_json)
+    }
+
+    /// Persist frontend state for a specific workspace (isolation-safe; no active-id race).
+    pub fn save_frontend_state(
+        &self,
+        workspace_id: &str,
+        frontend_state_json: &str,
+    ) -> Result<(), String> {
+        let cache_dir = self.get_workspace_cache_dir(workspace_id)?;
+        let path = cache_dir.join("frontend_state.json");
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create frontend state dir {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create frontend state dir {}: {e}", parent.display())
+            })?;
         }
         std::fs::write(&path, frontend_state_json)
             .map_err(|e| format!("Failed to write frontend state {}: {e}", path.display()))
+    }
+
+    /// Per-workspace durable artifacts directory.
+    pub fn active_artifacts_dir(&self) -> Result<PathBuf, String> {
+        let active = self.get_active_workspace()?;
+        Ok(PathBuf::from(active.cache_dir).join("artifacts"))
+    }
+
+    /// Legacy helper — Doc Graph is app-global under `{app_data}/knowledge_base`.
+    /// Kept for callers that still resolve a path; prefer the global dir.
+    pub fn active_knowledge_base_dir(&self) -> Result<PathBuf, String> {
+        let active = self.get_active_workspace()?;
+        Ok(PathBuf::from(active.cache_dir).join("knowledge_base"))
+    }
+
+    /// Root used for connector configs scoped to the active workspace.
+    pub fn active_connectors_root(&self) -> Result<PathBuf, String> {
+        let active = self.get_active_workspace()?;
+        Ok(PathBuf::from(active.cache_dir))
     }
 
     pub fn save_active_workspace_as_nela(
@@ -696,4 +732,70 @@ fn extract_nela_archive(archive_path: &Path, target_dir: &Path) -> Result<(), St
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("nela_ws_iso_{nanos}"))
+    }
+
+    #[test]
+    fn frontend_state_writes_are_scoped_by_workspace_id() {
+        let root = temp_root();
+        let mgr = WorkspaceManager::new(&root).expect("manager");
+        let a = mgr.create_workspace(Some("A".into())).expect("ws a");
+        let b = mgr.create_workspace(Some("B".into())).expect("ws b");
+
+        mgr.save_frontend_state(&a.id, r#"{"ws":"a"}"#)
+            .expect("save a");
+        mgr.save_frontend_state(&b.id, r#"{"ws":"b"}"#)
+            .expect("save b");
+
+        // Active is B (last created); saving under A's id must not clobber B.
+        assert_eq!(
+            mgr.get_frontend_state(&a.id).unwrap().as_deref(),
+            Some(r#"{"ws":"a"}"#)
+        );
+        assert_eq!(
+            mgr.get_frontend_state(&b.id).unwrap().as_deref(),
+            Some(r#"{"ws":"b"}"#)
+        );
+
+        let a_path = PathBuf::from(&a.cache_dir).join("frontend_state.json");
+        let b_path = PathBuf::from(&b.cache_dir).join("frontend_state.json");
+        assert!(a_path.exists());
+        assert!(b_path.exists());
+        assert_ne!(a_path, b_path);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn isolation_dirs_live_under_active_workspace_cache() {
+        let root = temp_root();
+        let mgr = WorkspaceManager::new(&root).expect("manager");
+        let ws = mgr.create_workspace(Some("Iso".into())).expect("ws");
+
+        let artifacts = mgr.active_artifacts_dir().unwrap();
+        let connectors = mgr.active_connectors_root().unwrap();
+
+        assert_eq!(artifacts, PathBuf::from(&ws.cache_dir).join("artifacts"));
+        assert_eq!(connectors, PathBuf::from(&ws.cache_dir));
+
+        let other = mgr.create_workspace(Some("Other".into())).expect("other");
+        assert_eq!(
+            mgr.active_artifacts_dir().unwrap(),
+            PathBuf::from(&other.cache_dir).join("artifacts")
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

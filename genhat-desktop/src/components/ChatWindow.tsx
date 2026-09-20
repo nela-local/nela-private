@@ -193,9 +193,12 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const pdfEngineByPath = useChatModeStore((s) => s.pdfEngineByPath);
   const openConnectorsModal = useConnectorStore((s) => s.openModal);
   const refreshConnectors = useConnectorStore((s) => s.refresh);
+  const liveStreamSessionId = useArtifactStreamStore((s) => s.sessionId);
   const liveStreamHasBody = useArtifactStreamStore(
     (s) => s.active && Boolean(s.html || s.csv)
   );
+  const liveStreamBelongsToSession =
+    liveStreamHasBody && liveStreamSessionId === session?.id;
   const gmailConfirmPending = useGmailSendConfirmStore((s) => s.pending);
   const gmailReadConfirmPending = useGmailReadConfirmStore((s) => s.pending);
   const gmailConnectPrompt = useGmailConnectPromptStore((s) => s.visible);
@@ -989,7 +992,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
                   hasLiveStreamBody={
                     isLast &&
                     Boolean(
-                      liveStreamHasBody ||
+                      liveStreamBelongsToSession ||
                         session?.streamingArtifactHtml ||
                         session?.streamingArtifactCsv
                     )

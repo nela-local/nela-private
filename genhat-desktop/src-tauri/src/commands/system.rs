@@ -77,16 +77,48 @@ pub fn detect_model_params(filename: String) -> String {
     format!("{:?}", params)
 }
 
-/// Export diagnostic telemetry logs to the Downloads directory.
+/// Export a sanitized support bundle (logs + device/env metadata) to Downloads.
+#[tauri::command]
+pub fn export_support_bundle(
+    app: tauri::AppHandle,
+    frontend_diagnostics_json: Option<String>,
+) -> Result<String, String> {
+    let app_cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Failed to resolve cache dir: {e}"))?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+    let downloads_dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("Failed to resolve downloads dir: {e}"))?;
+
+    let app_version = app
+        .package_info()
+        .version
+        .to_string();
+
+    let frontend = frontend_diagnostics_json
+        .filter(|s| !s.trim().is_empty())
+        .map(|raw_json| crate::telemetry::export::FrontendDiagnostics { raw_json });
+
+    let path = crate::telemetry::export::export_support_bundle(
+        &app_cache_dir,
+        &app_data_dir,
+        &downloads_dir,
+        &app_version,
+        frontend.as_ref(),
+    )?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Export diagnostic telemetry logs to the Downloads directory (legacy alias).
 #[tauri::command]
 pub fn export_telemetry_logs(app: tauri::AppHandle) -> Result<String, String> {
-    let app_cache_dir = app.path().app_cache_dir()
-        .map_err(|e| format!("Failed to resolve cache dir: {e}"))?;
-    let downloads_dir = app.path().download_dir()
-        .map_err(|e| format!("Failed to resolve downloads dir: {e}"))?;
-    
-    let path = crate::telemetry::export_logs(&app_cache_dir, &downloads_dir)?;
-    Ok(path.to_string_lossy().to_string())
+    export_support_bundle(app, None)
 }
 
 /// Open Windows File Explorer and select/highlight the file, or open parent directory on other platforms.

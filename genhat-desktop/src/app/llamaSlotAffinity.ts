@@ -76,3 +76,21 @@ export function releaseLlamaSlotsForWorkspace(workspaceId: string | null | undef
     }
   }
 }
+
+/**
+ * Release workspace slot affinities except for sessions still generating
+ * in the background after a workspace switch.
+ */
+export function releaseLlamaSlotsForWorkspaceExcept(
+  workspaceId: string | null | undefined,
+  keepSessionIds: ReadonlySet<string>
+): void {
+  const prefix = `${(workspaceId ?? "default").trim() || "default"}::`;
+  for (let i = bindings.length - 1; i >= 0; i--) {
+    const key = bindings[i].key;
+    if (!key.startsWith(prefix)) continue;
+    const sessionId = key.slice(prefix.length);
+    if (keepSessionIds.has(sessionId)) continue;
+    bindings.splice(i, 1);
+  }
+}

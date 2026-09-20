@@ -6,11 +6,15 @@ import {
   handleUninstall,
   downloadMissingOptionalModels,
 } from "../app/modelActions";
+import { Api } from "../api";
+import { buildFrontendDiagnosticsPayload } from "../app/clientErrorCapture";
 import { useUIStore } from "../stores/uiStore";
 import { useModelStore } from "../stores/modelStore";
 import { useDownloadStore } from "../stores/downloadStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useAuthStore } from "../stores/authStore";
+import { useCloudStore } from "../stores/cloudStore";
+import { useSessionStore } from "../stores/sessionStore";
 import AppModal from "./AppModal";
 import HuggingFaceModal from "./HuggingFaceModal";
 import ModelsSettingsModal from "./ModelsSettingsModal";
@@ -72,11 +76,44 @@ export default function AppDialogsLayer({
   const cloudSettingsOpen = useUIStore(s => s.cloudSettingsOpen);
   const setCloudSettingsOpen = useUIStore(s => s.setCloudSettingsOpen);
   const confirmAction = useUIStore(s => s.confirmAction);
+  const showModal = useUIStore(s => s.showModal);
+  const showError = useUIStore(s => s.showError);
   const hydrateAuth = useAuthStore(s => s.hydrate);
+  const preferredMode = useCloudStore(s => s.preferredMode);
+  const sessionCount = useSessionStore(s => s.sessions.length);
 
   useEffect(() => {
     void hydrateAuth();
   }, [hydrateAuth]);
+
+  const exportSupportBundleFromModal = async () => {
+    try {
+      const payload = buildFrontendDiagnosticsPayload({
+        preferred_mode: preferredMode,
+        active_workspace_id: activeWorkspace?.id ?? null,
+        open_session_count: sessionCount,
+        from_error_modal: true,
+        error_modal_title: appModal.title,
+        error_modal_message: appModal.message,
+      });
+      const path = await Api.exportSupportBundle(payload);
+      try {
+        await Api.revealInExplorer(path);
+      } catch {
+        /* best-effort */
+      }
+      showModal(
+        "info",
+        "Support bundle ready",
+        `Saved a sanitized diagnostics zip:\n\n${path}\n\nEmail it to genaihasteeth@gmail.com with a short description of what failed.`
+      );
+    } catch (err) {
+      showError(
+        err instanceof Error ? err.message : String(err),
+        "Couldn't export support bundle"
+      );
+    }
+  };
   
   const registeredModels = useModelStore(s => s.registeredModels);
   const modelCatalog = useModelStore(s => s.modelCatalog);
@@ -119,6 +156,9 @@ export default function AppDialogsLayer({
         showCancel={appModal.showCancel}
         onConfirm={handleModalConfirm}
         onCancel={handleModalCancel}
+        onExportSupportBundle={
+          appModal.kind === "error" ? exportSupportBundleFromModal : undefined
+        }
       />
 
       <ModelsSettingsModal

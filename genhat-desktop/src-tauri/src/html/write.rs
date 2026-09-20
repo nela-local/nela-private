@@ -43,7 +43,7 @@ pub fn write_html_plan(plan: HtmlPlan) -> Result<PathBuf, String> {
         slug
     };
 
-    let out_dir = crate::paths::artifacts_dir();
+    let out_dir = crate::paths::artifacts_dir_for_workspace(plan.workspace_id.as_deref());
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("Create output dir: {e}"))?;
     let path = crate::paths::unique_artifact_path(&out_dir, &slug, "html");
 

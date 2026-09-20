@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { X, Download, Loader2, Trash2, Sparkles, Save, CheckCircle, SlidersHorizontal, Cpu, Scissors } from "lucide-react";
+import { X, Download, Loader2, Trash2, Sparkles, Save, CheckCircle, SlidersHorizontal, Cpu, Scissors, LifeBuoy } from "lucide-react";
 import type { RegisteredModel, RagModelPreferences } from "../types";
 import { KITTEN_TTS_VOICES } from "../types";
 import { Api, type CompatibilityRating } from "../api";
@@ -8,9 +8,12 @@ import { DropdownSelect } from "./DropdownSelect";
 import { useAdvancedMode } from "../hooks/useAdvancedMode";
 import { useTheme, type ThemeName } from "../hooks/useTheme";
 import { handleManualContextCompaction } from "../app/sessionSendActions";
+import { buildFrontendDiagnosticsPayload } from "../app/clientErrorCapture";
 import { useSessionStore } from "../stores/sessionStore";
 import { useChatModeStore } from "../stores/chatModeStore";
 import { useUIStore } from "../stores/uiStore";
+import { useWorkspaceStore } from "../stores/workspaceStore";
+import { useCloudStore } from "../stores/cloudStore";
 import {
   DEFAULT_INTELLIGENCE_MAPPING,
   INTELLIGENCE_MODE_OPTIONS,
@@ -340,12 +343,17 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
   const { theme, setTheme } = useTheme();
   const setHfModalOpen = useUIStore((s) => s.setHfModalOpen);
   const setHfModalPreset = useUIStore((s) => s.setHfModalPreset);
+  const showModal = useUIStore((s) => s.showModal);
+  const showError = useUIStore((s) => s.showError);
   const updateChecking = useAppUpdateStore((s) => s.checking);
   const updateError = useAppUpdateStore((s) => s.error);
   const upToDateMessage = useAppUpdateStore((s) => s.upToDateMessage);
   const runManualCheck = useAppUpdateStore((s) => s.runManualCheck);
   const clearUpToDate = useAppUpdateStore((s) => s.clearUpToDate);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [supportBundleBusy, setSupportBundleBusy] = useState(false);
+  const activeWorkspace = useWorkspaceStore((s) => s.activeWorkspace);
+  const preferredMode = useCloudStore((s) => s.preferredMode);
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const contextUsageBySession = useSessionStore((s) => s.contextUsageBySession);
@@ -384,6 +392,38 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
         .catch(() => setAppVersion(null));
     }
   }, [isOpen, clearUpToDate]);
+
+  const exportSupportBundle = async () => {
+    if (supportBundleBusy) return;
+    setSupportBundleBusy(true);
+    try {
+      const payload = buildFrontendDiagnosticsPayload({
+        app_version: appVersion,
+        preferred_mode: preferredMode,
+        active_workspace_id: activeWorkspace?.id ?? null,
+        open_session_count: sessions.length,
+        // Counts only — never message text.
+      });
+      const path = await Api.exportSupportBundle(payload);
+      try {
+        await Api.revealInExplorer(path);
+      } catch {
+        /* folder open is best-effort */
+      }
+      showModal(
+        "info",
+        "Support bundle ready",
+        `Saved a sanitized diagnostics zip (no chats or secrets):\n\n${path}\n\nAttach it to an email to genaihasteeth@gmail.com. Please include what you were doing when the issue happened.`
+      );
+    } catch (err) {
+      showError(
+        err instanceof Error ? err.message : String(err),
+        "Couldn't export support bundle"
+      );
+    } finally {
+      setSupportBundleBusy(false);
+    }
+  };
 
   const chatModelOptions = useMemo(() => {
     const source = modelCatalog.length > 0 ? modelCatalog : models;
@@ -666,16 +706,37 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
                   {updateError ? ` · Update check failed: ${updateError}` : ""}
                 </div>
               </div>
-              <button
-                type="button"
-                disabled={updateChecking}
-                onClick={() => void runManualCheck()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-glass-border text-[0.78rem] text-txt-muted hover:text-txt hover:border-neon/50 disabled:opacity-50 transition"
-              >
-                {updateChecking ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                Check for updates
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={supportBundleBusy}
+                  onClick={() => void exportSupportBundle()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-glass-border text-[0.78rem] text-txt-muted hover:text-txt hover:border-neon/50 disabled:opacity-50 transition"
+                  title="Export sanitized logs and diagnostics for genaihasteeth@gmail.com"
+                >
+                  {supportBundleBusy ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <LifeBuoy size={14} />
+                  )}
+                  Export support bundle
+                </button>
+                <button
+                  type="button"
+                  disabled={updateChecking}
+                  onClick={() => void runManualCheck()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-glass-border text-[0.78rem] text-txt-muted hover:text-txt hover:border-neon/50 disabled:opacity-50 transition"
+                >
+                  {updateChecking ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Check for updates
+                </button>
+              </div>
             </div>
+            <p className="text-[0.72rem] text-txt-muted m-0 leading-relaxed">
+              Support bundles include sanitized backend logs, device specs, workspace names, and
+              recent UI errors — not chat history, documents, or API keys. Send the zip to{" "}
+              <span className="text-txt">genaihasteeth@gmail.com</span>.
+            </p>
             <div className="flex items-center justify-between gap-3 py-1 border-t border-glass-border pt-3">
               <div>
                 <div className="text-[0.85rem] font-semibold text-txt">Advanced mode</div>

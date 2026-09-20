@@ -38,6 +38,7 @@ pub fn create_workspace(
     router_state: State<'_, TaskRouterState>,
 ) -> Result<WorkspaceRecord, String> {
     let ws = state.0.create_workspace(name)?;
+    bind_workspace_isolation_paths(&state)?;
     reload_rag_for_active_workspace(&app, &state, &rag_state, &router_state)?;
     Ok(ws)
 }
@@ -52,6 +53,7 @@ pub fn open_workspace(
     router_state: State<'_, TaskRouterState>,
 ) -> Result<WorkspaceRecord, String> {
     let ws = state.0.open_workspace(&workspace_id)?;
+    bind_workspace_isolation_paths(&state)?;
     reload_rag_for_active_workspace(&app, &state, &rag_state, &router_state)?;
     Ok(ws)
 }
@@ -77,20 +79,25 @@ pub fn rename_workspace(
 }
 
 /// Read currently active workspace frontend state blob.
+/// Read persisted frontend state JSON for a workspace (required for isolation).
 #[tauri::command]
 pub fn get_workspace_frontend_state(
+    workspace_id: String,
     state: State<'_, WorkspaceState>,
 ) -> Result<Option<String>, String> {
-    state.0.get_active_frontend_state()
+    state.0.get_frontend_state(&workspace_id)
 }
 
-/// Persist currently active workspace frontend state blob.
+/// Persist frontend state JSON for a workspace (required for isolation).
 #[tauri::command]
 pub fn save_workspace_frontend_state(
+    workspace_id: String,
     frontend_state_json: String,
     state: State<'_, WorkspaceState>,
 ) -> Result<(), String> {
-    state.0.save_active_frontend_state(&frontend_state_json)
+    state
+        .0
+        .save_frontend_state(&workspace_id, &frontend_state_json)
 }
 
 /// Save active workspace cache and metadata into a target .nela file.
@@ -121,6 +128,7 @@ pub fn delete_workspace(
     }
     
     let active = state.0.delete_workspace(&workspace_id)?;
+    bind_workspace_isolation_paths(&state)?;
     reload_rag_for_active_workspace(&app, &state, &rag_state, &router_state)?;
     Ok(active)
 }
@@ -147,6 +155,7 @@ pub fn open_workspace_nela(
     router_state: State<'_, TaskRouterState>,
 ) -> Result<WorkspaceOpenResult, String> {
     let out = state.0.open_workspace_nela(&nela_path, name)?;
+    bind_workspace_isolation_paths(&state)?;
     reload_rag_for_active_workspace(&app, &state, &rag_state, &router_state)?;
     Ok(out)
 }
@@ -168,6 +177,26 @@ pub fn save_rag_model_preferences(
     state: State<'_, WorkspaceState>,
 ) -> Result<(), String> {
     state.0.save_rag_model_preferences(&workspace_id, &prefs)
+}
+
+fn bind_workspace_isolation_paths(
+    workspace_state: &State<'_, WorkspaceState>,
+) -> Result<(), String> {
+    // Artifacts → workspaces/{id}/cache/artifacts
+    let artifacts = workspace_state.0.active_artifacts_dir()?;
+    let workspace_id = workspace_state
+        .0
+        .active_workspace_id()
+        .unwrap_or_else(|| "default".to_string());
+    crate::paths::register_workspace_artifacts(&workspace_id, artifacts);
+
+    // Tally connector config → workspaces/{id}/cache/connectors/tally.json
+    let connectors_root = workspace_state.0.active_connectors_root()?;
+    crate::connectors::tally::set_app_data_dir(connectors_root);
+
+    // Doc Graph is intentionally global — not rebound per workspace.
+
+    Ok(())
 }
 
 fn reload_rag_for_active_workspace(

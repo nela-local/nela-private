@@ -135,13 +135,16 @@ export default function AppMainContentArea({
 }: AppMainContentAreaProps) {
   const updateSession = useSessionStore((s) => s.updateSession);
   const sidebarSection = useUIStore((s) => s.sidebarSection);
+  const activeSessionId = activeSession?.id ?? null;
   const liveStreamHtml = useArtifactStreamStore((s) =>
-    s.active && s.type === "text/html" ? s.html : ""
+    s.active && s.type === "text/html" && s.sessionId === activeSessionId ? s.html : ""
   );
   const liveStreamCsv = useArtifactStreamStore((s) =>
-    s.active && s.type === "text/csv" ? s.csv : ""
+    s.active && s.type === "text/csv" && s.sessionId === activeSessionId ? s.csv : ""
   );
-  const liveStreamActive = useArtifactStreamStore((s) => s.active);
+  const liveStreamActive = useArtifactStreamStore(
+    (s) => s.active && s.sessionId === activeSessionId
+  );
   const panelHtml =
     liveStreamHtml || activeSession?.streamingArtifactHtml || "";
   const panelCsv =

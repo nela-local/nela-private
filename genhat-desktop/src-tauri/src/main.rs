@@ -207,6 +207,23 @@ fn main() {
                     .expect("Failed to initialize workspace manager"),
             );
 
+            // Bind durable outputs + Tally config to the active workspace cache
+            // (falls back to global paths only when no workspace is active yet).
+            if let Ok(artifacts) = workspace_manager.active_artifacts_dir() {
+                let ws_id = workspace_manager
+                    .active_workspace_id()
+                    .unwrap_or_else(|| "default".to_string());
+                app_lib::paths::register_workspace_artifacts(&ws_id, artifacts);
+            }
+            if let Ok(connectors_root) = workspace_manager.active_connectors_root() {
+                app_lib::connectors::tally::set_app_data_dir(connectors_root);
+            }
+
+            // Doc Graph is app-global (shared across workspaces) — indexes the
+            // user's files on disk, not per-workspace chat/RAG state.
+            let kb_dir = app_data_dir.join("knowledge_base");
+            let _ = std::fs::create_dir_all(&kb_dir);
+
             // 8. Initialize RAG pipeline for active workspace cache
             let rag_dir = workspace_manager
                 .active_rag_dir()
@@ -257,11 +274,10 @@ fn main() {
             app.manage(McpCoordinatorState(mcp_coordinator));
             app.manage(IntentResolverState(intent_resolver));
 
-            // Structural knowledge-graph engine (filesystem index replacement)
-            let kb_dir = app_data_dir.join("knowledge_base");
+            // Structural knowledge-graph engine (app-global under knowledge_base/)
             match app_lib::doc_graph::DocGraphState::open(kb_dir) {
                 Ok(state) => {
-                    let engine = state.0.clone();
+                    let engine = state.engine();
                     app.manage(state);
                     log::info!("Doc-graph knowledge base ready");
                     // Autostart incremental sync of $HOME (diff-only on later launches).
@@ -276,7 +292,7 @@ fn main() {
                     let fallback = app_data_dir.join("knowledge_base");
                     let _ = std::fs::create_dir_all(&fallback);
                     if let Ok(state) = app_lib::doc_graph::DocGraphState::open(fallback) {
-                        let engine = state.0.clone();
+                        let engine = state.engine();
                         app.manage(state);
                         let handle = app.handle().clone();
                         tauri::async_runtime::spawn(async move {
@@ -424,6 +440,7 @@ fn main() {
             app_lib::commands::system::detect_quantization,
             app_lib::commands::system::detect_model_params,
             app_lib::commands::system::export_telemetry_logs,
+            app_lib::commands::system::export_support_bundle,
             app_lib::commands::system::reveal_in_explorer,
             app_lib::commands::system::open_path_in_os,
             app_lib::commands::system::copy_file_to_path,

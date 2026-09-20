@@ -46,6 +46,9 @@ function App() {
     void import("./app/performanceMode").then(({ applyPerformanceDom }) => {
       applyPerformanceDom();
     });
+    void import("./app/clientErrorCapture").then(({ installClientErrorCapture }) => {
+      installClientErrorCapture();
+    });
   }, []);
 
   const toggleTheme = () => setTheme(theme === "neon" ? "professional" : "neon");

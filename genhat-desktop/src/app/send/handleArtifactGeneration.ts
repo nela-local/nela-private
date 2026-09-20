@@ -8,7 +8,10 @@ import { buildPresentationFallbackPlan, isLikelyDeckTemplate } from "../presenta
 import { streamChatByMode, collectStreamText, willRouteToCloud } from "./cloudOrLocalStream";
 import { useCloudStore } from "../../stores/cloudStore";
 import { useChatModeStore } from "../../stores/chatModeStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useArtifactStreamStore } from "../../stores/artifactStreamStore";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { getParkedWorkspaceId } from "../backgroundGenerationPark";
 import {
   buildSpreadsheetDataContext,
   buildSpreadsheetFallbackPlan,
@@ -1146,16 +1149,19 @@ SOURCE + USER-BRIEF RULES (mandatory):
     let csvPanelOpened = false;
     let htmlPanelOpened = false;
     const pushArtifactSession = () => {
-      const store = useArtifactStreamStore.getState();
+      const live = useSessionStore.getState().sessions.some((s) => s.id === sid);
+      const store = live ? useArtifactStreamStore.getState() : null;
       if (streamedArtifactType === "text/csv") {
-        if (!csvPanelOpened) {
-          store.begin({
-            sessionId: sid,
-            type: "text/csv",
-            title: streamedArtifactTitle,
-          });
+        if (store) {
+          if (!csvPanelOpened) {
+            store.begin({
+              sessionId: sid,
+              type: "text/csv",
+              title: streamedArtifactTitle,
+            });
+          }
+          store.setCsv(streamedArtifactBody, streamedArtifactTitle);
         }
-        store.setCsv(streamedArtifactBody, streamedArtifactTitle);
         if (csvPanelOpened) return;
         csvPanelOpened = true;
         ctx.updateSession(sid, (prev) => {
@@ -1185,19 +1191,22 @@ SOURCE + USER-BRIEF RULES (mandatory):
             artifactPanelOpen: true,
             streamingArtifactType: streamedArtifactType,
             streamingArtifactTitle: streamedArtifactTitle || undefined,
+            streamingArtifactCsv: streamedArtifactBody || undefined,
             messages: updated,
           };
         });
         return;
       }
-      if (!htmlPanelOpened) {
-        store.begin({
-          sessionId: sid,
-          type: "text/html",
-          title: streamedArtifactTitle,
-        });
+      if (store) {
+        if (!htmlPanelOpened) {
+          store.begin({
+            sessionId: sid,
+            type: "text/html",
+            title: streamedArtifactTitle,
+          });
+        }
+        store.setHtml(streamedArtifactBody, streamedArtifactTitle);
       }
-      store.setHtml(streamedArtifactBody, streamedArtifactTitle);
       if (htmlPanelOpened) return;
       htmlPanelOpened = true;
       ctx.updateSession(sid, (prev) => {
@@ -1227,6 +1236,7 @@ SOURCE + USER-BRIEF RULES (mandatory):
           artifactPanelOpen: true,
           streamingArtifactType: streamedArtifactType,
           streamingArtifactTitle: streamedArtifactTitle || undefined,
+          streamingArtifactHtml: streamedArtifactBody || undefined,
           messages: updated,
         };
       });
@@ -1411,6 +1421,11 @@ SOURCE + USER-BRIEF RULES (mandatory):
                   ? streamedArtifactBody.trim()
                   : body;
               try {
+                const workspaceId =
+                  getParkedWorkspaceId(sid) ||
+                  ctx.getChatGenerationOptions(ctx.selectedModel).workspaceId ||
+                  useWorkspaceStore.getState().activeWorkspace?.id ||
+                  null;
                 const result = await saveStreamedArtifact({
                   type: streamedArtifactType,
                   rawBody: saveBody,
@@ -1422,6 +1437,7 @@ SOURCE + USER-BRIEF RULES (mandatory):
                     streamedArtifactType === "text/html" ? imagePool : undefined,
                   chartPool:
                     streamedArtifactType === "text/html" ? chartPool : undefined,
+                  workspaceId,
                 });
                 // Keep side-panel HTML in sync with embedded images/charts + theme.
                 if (
@@ -1561,6 +1577,12 @@ SOURCE + USER-BRIEF RULES (mandatory):
                         relaxValidation: true,
                         imagePool: imagePool.length ? imagePool : undefined,
                         chartPool: chartPool.length ? chartPool : undefined,
+                        workspaceId:
+                          getParkedWorkspaceId(sid) ||
+                          ctx.getChatGenerationOptions(ctx.selectedModel)
+                            .workspaceId ||
+                          useWorkspaceStore.getState().activeWorkspace?.id ||
+                          null,
                       });
                       const filename =
                         retry.path.split(/[/\\]/).pop() ?? "artifact";

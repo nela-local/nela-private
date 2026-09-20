@@ -69,9 +69,11 @@ export async function saveStreamedHtmlArtifact(input: {
   relaxValidation?: boolean;
   imagePool?: ImagePoolEntry[];
   chartPool?: ChartPoolEntry[];
+  workspaceId?: string | null;
 }): Promise<ArtifactResult> {
   const embed = (html: string) =>
     withMediaEmbeds(html, input.imagePool, input.chartPool);
+  const workspace_id = input.workspaceId?.trim() || undefined;
 
   if (input.asPresentation) {
     if (looksLikePresentationJsonPlan(input.rawBody)) {
@@ -91,6 +93,7 @@ export async function saveStreamedHtmlArtifact(input: {
       sections: [],
       html: themed,
       output_name: outputName,
+      workspace_id,
     });
   }
 
@@ -128,6 +131,7 @@ export async function saveStreamedHtmlArtifact(input: {
     sections: [],
     html: themed,
     output_name: outputName,
+    workspace_id,
   });
 }
 
@@ -197,6 +201,7 @@ export async function saveStreamedArtifact(input: {
   relaxValidation?: boolean;
   imagePool?: ImagePoolEntry[];
   chartPool?: ChartPoolEntry[];
+  workspaceId?: string | null;
 }): Promise<ArtifactResult> {
   if (input.type === "text/csv") {
     return saveStreamedCsvArtifact({
@@ -214,5 +219,6 @@ export async function saveStreamedArtifact(input: {
     relaxValidation: input.relaxValidation,
     imagePool: input.imagePool,
     chartPool: input.chartPool,
+    workspaceId: input.workspaceId,
   });
 }

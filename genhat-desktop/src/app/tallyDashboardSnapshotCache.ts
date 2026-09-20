@@ -73,6 +73,11 @@ type LiveSnapshotDraft = {
 /** In-memory drafts keyed by live artifact path (last shown live data). */
 const liveDrafts = new Map<string, LiveSnapshotDraft>();
 
+/** Drop all in-memory Tally snapshot drafts (workspace switch isolation). */
+export function clearTallyLiveDrafts(): void {
+  liveDrafts.clear();
+}
+
 function emptyTabError(msg = "Not loaded in this session"): { error: string } {
   return { error: msg };
 }

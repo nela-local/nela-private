@@ -236,6 +236,9 @@ pub struct HtmlPlan {
     /// Embedded images (data URIs) referenced by section `image_index`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<ArtifactImageAsset>>,
+    /// When set, write under that workspace's artifacts dir (background gens).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 
 fn default_html_archetype() -> String {

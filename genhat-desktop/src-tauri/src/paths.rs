@@ -15,14 +15,17 @@
 //! resource dir is a *sibling* (`../lib/<ProductName>/`) rather than a child of
 //! any ancestor.  This module adds the Tauri resource directory to the search.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock, RwLock};
 
 /// The Tauri product name (must match `productName` in tauri.conf.json).
 const PRODUCT_NAME: &str = "NELA";
 
 static RUNTIME_LLAMA_ROOT: OnceLock<PathBuf> = OnceLock::new();
-static ARTIFACTS_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static ARTIFACTS_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
+static ARTIFACTS_BY_WORKSPACE: LazyLock<RwLock<HashMap<String, PathBuf>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Register the writable llama.cpp runtime directory (typically app data).
 pub fn init_llama_runtime_root(root: PathBuf) {
@@ -30,18 +33,51 @@ pub fn init_llama_runtime_root(root: PathBuf) {
 }
 
 /// Register the durable artifacts directory (HTML / PPT / XLSX outputs).
+/// May be called again when switching workspaces (rebindable).
 pub fn init_artifacts_root(root: PathBuf) {
+    set_artifacts_root(root);
+}
+
+/// Rebind artifacts root to a workspace-scoped directory.
+pub fn set_artifacts_root(root: PathBuf) {
     let _ = std::fs::create_dir_all(&root);
-    let _ = ARTIFACTS_ROOT.set(root);
+    if let Ok(mut slot) = ARTIFACTS_ROOT.write() {
+        *slot = Some(root);
+    }
+}
+
+/// Remember a workspace's artifacts directory so background generations can
+/// still write to the workspace they started in after a switch.
+pub fn register_workspace_artifacts(workspace_id: &str, root: PathBuf) {
+    let _ = std::fs::create_dir_all(&root);
+    if let Ok(mut map) = ARTIFACTS_BY_WORKSPACE.write() {
+        map.insert(workspace_id.to_string(), root.clone());
+    }
+    set_artifacts_root(root);
+}
+
+/// Resolve artifacts dir for a specific workspace (falls back to active root).
+pub fn artifacts_dir_for_workspace(workspace_id: Option<&str>) -> PathBuf {
+    if let Some(id) = workspace_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(map) = ARTIFACTS_BY_WORKSPACE.read() {
+            if let Some(root) = map.get(id) {
+                let _ = std::fs::create_dir_all(root);
+                return root.clone();
+            }
+        }
+    }
+    artifacts_dir()
 }
 
 /// Durable directory for generated artifacts (survives app restarts).
-/// Prefer the path set at app startup; otherwise fall back to `~/.nela/artifacts`
-/// (not system temp — `/tmp` is wiped on reboot).
+/// Prefer the path set at app startup / workspace switch; otherwise fall back
+/// to `~/.nela/artifacts` (not system temp — `/tmp` is wiped on reboot).
 pub fn artifacts_dir() -> PathBuf {
-    if let Some(root) = ARTIFACTS_ROOT.get() {
-        let _ = std::fs::create_dir_all(root);
-        return root.clone();
+    if let Ok(slot) = ARTIFACTS_ROOT.read() {
+        if let Some(root) = slot.as_ref() {
+            let _ = std::fs::create_dir_all(root);
+            return root.clone();
+        }
     }
     if let Ok(custom) = std::env::var("NELA_ARTIFACTS_DIR") {
         let path = PathBuf::from(custom);

@@ -164,6 +164,13 @@ export const useUIStore = create<UIState & UIActions>((set, get) => ({
   },
 
   showError: (message, title = "Something went wrong") => {
+    try {
+      void import("../app/clientErrorCapture").then(({ reportClientError }) => {
+        reportClientError(String(message), { context: title, source: "manual" });
+      });
+    } catch {
+      /* ignore */
+    }
     get().showModal("error", title, friendlyError(message));
   },
 

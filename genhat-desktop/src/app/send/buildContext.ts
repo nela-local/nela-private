@@ -58,6 +58,10 @@ export function buildSendHandlerContext(): SendHandlerContext {
   const modelStore = useModelStore.getState();
   const workspaceId = useWorkspaceStore.getState().activeWorkspace?.id ?? "default";
   const advanced = getAdvancedMode();
+  const originSessionId = sessionStore.activeSessionId;
+
+  const sessionStillLive = () =>
+    useSessionStore.getState().sessions.some((s) => s.id === originSessionId);
 
   return {
     activeSessionId: sessionStore.activeSessionId,
@@ -81,13 +85,28 @@ export function buildSendHandlerContext(): SendHandlerContext {
     ttsIntervalRef,
     updateSession: sessionStore.updateSession,
     setActiveMindmapOverlay: chatModeStore.setActiveMindmapOverlay,
-    setGeneralGenerating: chatModeStore.setGeneralGenerating,
-    setGeneralElapsedTime: chatModeStore.setGeneralElapsedTime,
+    setGeneralGenerating: (generating) => {
+      if (!sessionStillLive()) return;
+      chatModeStore.setGeneralGenerating(generating);
+    },
+    setGeneralElapsedTime: (t) => {
+      if (!sessionStillLive()) return;
+      chatModeStore.setGeneralElapsedTime(t);
+    },
     setGeneralGenerationTime: chatModeStore.setGeneralGenerationTime,
     setMindmapsBySession: chatModeStore.setMindmapsBySession,
-    setStreamingThinking: sessionStore.setStreamingThinking,
-    setTtsGenerating: chatModeStore.setTtsGenerating,
-    setTtsElapsedTime: chatModeStore.setTtsElapsedTime,
+    setStreamingThinking: (thinking) => {
+      if (!sessionStillLive()) return;
+      sessionStore.setStreamingThinking(thinking);
+    },
+    setTtsGenerating: (generating) => {
+      if (!sessionStillLive()) return;
+      chatModeStore.setTtsGenerating(generating);
+    },
+    setTtsElapsedTime: (t) => {
+      if (!sessionStillLive()) return;
+      chatModeStore.setTtsElapsedTime(t);
+    },
     setTtsGenerationTime: chatModeStore.setTtsGenerationTime,
     setContextUsageForSession: sessionStore.setContextUsageForSession,
     clearImage: chatModeStore.clearImage,
@@ -96,7 +115,7 @@ export function buildSendHandlerContext(): SendHandlerContext {
     getChatGenerationOptions: (modelIdentifier) => ({
       ...modelStore.getChatGenerationOptions(modelIdentifier),
       // Freeze affinity to the session that started this send (not the later active tab).
-      sessionId: sessionStore.activeSessionId,
+      sessionId: originSessionId,
       workspaceId,
     }),
   };

@@ -316,14 +316,20 @@ export const Api = {
     });
   },
 
-  /** Read persisted frontend state JSON for the active workspace. */
-  async getWorkspaceFrontendState(): Promise<string | null> {
-    return invoke<string | null>("get_workspace_frontend_state");
+  /** Read persisted frontend state JSON for a workspace (isolation-safe). */
+  async getWorkspaceFrontendState(workspaceId: string): Promise<string | null> {
+    return invoke<string | null>("get_workspace_frontend_state", {
+      workspaceId,
+    });
   },
 
-  /** Persist frontend state JSON for the active workspace. */
-  async saveWorkspaceFrontendState(frontendStateJson: string): Promise<void> {
+  /** Persist frontend state JSON for a workspace (isolation-safe). */
+  async saveWorkspaceFrontendState(
+    workspaceId: string,
+    frontendStateJson: string
+  ): Promise<void> {
     await invoke("save_workspace_frontend_state", {
+      workspaceId,
       frontendStateJson,
     });
   },
@@ -1211,6 +1217,21 @@ export const Api = {
   /** Get device specifications (RAM, CPU, OS, AVX2 support) */
   async getSystemSpecs(): Promise<DeviceSpecs> {
     return invoke<DeviceSpecs>("get_system_specs");
+  },
+
+  /**
+   * Build a sanitized support zip in Downloads (logs, device specs, recent UI errors).
+   * Returns the absolute path of the zip.
+   */
+  async exportSupportBundle(frontendDiagnosticsJson?: string): Promise<string> {
+    return invoke<string>("export_support_bundle", {
+      frontendDiagnosticsJson: frontendDiagnosticsJson ?? null,
+    });
+  },
+
+  /** Legacy alias — same as exportSupportBundle without frontend payload. */
+  async exportTelemetryLogs(): Promise<string> {
+    return invoke<string>("export_telemetry_logs");
   },
 
   /** Check if a model is compatible with the current device */

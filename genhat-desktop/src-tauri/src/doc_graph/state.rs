@@ -480,10 +480,26 @@ impl DocGraphEngine {
     }
 }
 
-pub struct DocGraphState(pub Arc<DocGraphEngine>);
+pub struct DocGraphState {
+    engine: parking_lot::RwLock<Arc<DocGraphEngine>>,
+}
 
 impl DocGraphState {
     pub fn open(data_dir: PathBuf) -> Result<Self, EngineError> {
-        Ok(Self(Arc::new(DocGraphEngine::open(data_dir)?)))
+        Ok(Self {
+            engine: parking_lot::RwLock::new(Arc::new(DocGraphEngine::open(data_dir)?)),
+        })
+    }
+
+    /// Current engine handle (clone Arc — cheap).
+    pub fn engine(&self) -> Arc<DocGraphEngine> {
+        self.engine.read().clone()
+    }
+
+    /// Swap to a different on-disk knowledge base (workspace isolation).
+    pub fn replace_with_dir(&self, data_dir: PathBuf) -> Result<(), EngineError> {
+        let next = Arc::new(DocGraphEngine::open(data_dir)?);
+        *self.engine.write() = next;
+        Ok(())
     }
 }

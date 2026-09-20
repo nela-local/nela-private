@@ -1,5 +1,5 @@
-import React from "react";
-import { Info, AlertTriangle, XCircle, CheckCircle2, X } from "lucide-react";
+import React, { useState } from "react";
+import { Info, AlertTriangle, XCircle, CheckCircle2, X, LifeBuoy, Loader2 } from "lucide-react";
 import "./AppModal.css";
 
 export type AppModalKind = "info" | "warning" | "error" | "confirm";
@@ -14,6 +14,8 @@ interface AppModalProps {
   showCancel?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Shown on error modals so users can send diagnostics immediately. */
+  onExportSupportBundle?: () => Promise<void> | void;
 }
 
 const AppModal: React.FC<AppModalProps> = ({
@@ -26,7 +28,9 @@ const AppModal: React.FC<AppModalProps> = ({
   showCancel = false,
   onConfirm,
   onCancel,
+  onExportSupportBundle,
 }) => {
+  const [exporting, setExporting] = useState(false);
   if (!isOpen) return null;
 
   const icon = (() => {
@@ -41,6 +45,16 @@ const AppModal: React.FC<AppModalProps> = ({
         return <Info size={20} />;
     }
   })();
+
+  const handleExport = async () => {
+    if (!onExportSupportBundle || exporting) return;
+    setExporting(true);
+    try {
+      await onExportSupportBundle();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="app-modal-overlay" onClick={onCancel}>
@@ -58,6 +72,17 @@ const AppModal: React.FC<AppModalProps> = ({
           <p>{message}</p>
         </div>
         <div className="app-modal-actions">
+          {kind === "error" && onExportSupportBundle && (
+            <button
+              type="button"
+              className="app-modal-btn ghost"
+              disabled={exporting}
+              onClick={() => void handleExport()}
+            >
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <LifeBuoy size={14} />}
+              <span style={{ marginLeft: 6 }}>Export support bundle</span>
+            </button>
+          )}
           {showCancel && (
             <button className="app-modal-btn ghost" onClick={onCancel}>
               {cancelLabel}

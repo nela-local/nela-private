@@ -20,6 +20,10 @@ import {
 import { refreshModels, downloadMissingOptionalModels } from "../../app/modelActions";
 import { loadRagDocs, buildWorkspaceFrontendState, buildLocalSessionMirrorState, hydrateSessionFromBackend } from "../../app/workspaceBridge";
 import { createEmptySession, normalizeSession } from "../../app/sessionUtils";
+import {
+  mergeParkedIntoSessions,
+  releaseParkedForWorkspace,
+} from "../../app/backgroundGenerationPark";
 import { normalizeMindmapsStore } from "../../app/mindmapUtils";
 import {
   CONTEXT_COMPACTION_KEEP_RECENT,
@@ -241,16 +245,24 @@ export function useAppLifecycle() {
 
     let cancelled = false;
 
-    const applyRawState = (raw: string | null) => {
+    const applyRawState = (raw: string | null, workspaceId: string | null) => {
       if (!raw) {
         const fresh = createEmptySession();
         const sessionStore = useSessionStore.getState();
         const chatModeStore = useChatModeStore.getState();
-        sessionStore.setSessions([fresh]);
-        sessionStore.setOpenSessionIds([fresh.id]);
-        sessionStore.setActiveSessionId(fresh.id);
+        const finalSessions =
+          workspaceId != null
+            ? (() => {
+                const parked = mergeParkedIntoSessions(workspaceId, []);
+                return parked.length > 0 ? parked : [fresh];
+              })()
+            : [fresh];
+        sessionStore.setSessions(finalSessions);
+        sessionStore.setOpenSessionIds([finalSessions[0]!.id]);
+        sessionStore.setActiveSessionId(finalSessions[0]!.id);
         chatModeStore.setMindmapsBySession({});
         chatModeStore.setActiveMindmapOverlay(null);
+        if (workspaceId) releaseParkedForWorkspace(workspaceId);
         return;
       }
 
@@ -264,9 +276,12 @@ export function useAppLifecycle() {
           selectedTtsEngine?: string;
           selectedVisionModel?: string;
         };
-        const loaded = Array.isArray(parsed.sessions)
+        let loaded = Array.isArray(parsed.sessions)
           ? parsed.sessions.map(normalizeSession)
           : [];
+        if (workspaceId) {
+          loaded = mergeParkedIntoSessions(workspaceId, loaded);
+        }
         const restoredMindmaps = normalizeMindmapsStore(parsed.mindmapsBySession);
         
         const sessionStore = useSessionStore.getState();
@@ -288,7 +303,16 @@ export function useAppLifecycle() {
           const restoredOpen = Array.isArray(parsed.openSessionIds)
             ? parsed.openSessionIds.filter((id) => loaded.some((s) => s.id === id))
             : [];
-          sessionStore.setOpenSessionIds(restoredOpen.length > 0 ? restoredOpen : [nextActive]);
+          // Keep generating parked chats visible in the tab strip.
+          const openWithParked = [...restoredOpen];
+          for (const s of loaded) {
+            if (s.loading && !openWithParked.includes(s.id)) {
+              openWithParked.push(s.id);
+            }
+          }
+          sessionStore.setOpenSessionIds(
+            openWithParked.length > 0 ? openWithParked : [nextActive]
+          );
           sessionStore.setActiveSessionId(nextActive);
           chatModeStore.setMindmapsBySession(restoredMindmaps);
         }
@@ -299,6 +323,10 @@ export function useAppLifecycle() {
         if (parsed.selectedVisionModel) modelStore.setSelectedVisionModel(parsed.selectedVisionModel);
 
         chatModeStore.setActiveMindmapOverlay(null);
+        if (workspaceId) {
+          // Parked copies are now live in the session store.
+          releaseParkedForWorkspace(workspaceId);
+        }
       } catch (err) {
         console.error("Failed to parse workspace state:", err);
         const fresh = createEmptySession();
@@ -314,11 +342,18 @@ export function useAppLifecycle() {
 
     (async () => {
       try {
-        // Primary store: workspace backend state blob.
-        const backendState = await Api.getWorkspaceFrontendState();
+        // Primary store: workspace backend state blob (scoped by workspace id).
+        const workspaceId = useWorkspaceStore.getState().activeWorkspace?.id;
+        if (!workspaceId) {
+          applyRawState(null, null);
+          return;
+        }
+        const backendState = await Api.getWorkspaceFrontendState(workspaceId);
         if (cancelled) return;
+        // Ignore late responses after a workspace switch.
+        if (useWorkspaceStore.getState().activeWorkspace?.id !== workspaceId) return;
         if (backendState) {
-          applyRawState(backendState);
+          applyRawState(backendState, workspaceId);
           return;
         }
 
@@ -326,7 +361,8 @@ export function useAppLifecycle() {
         const storageKey = `${SESSION_STORAGE_PREFIX}${useWorkspaceStore.getState().workspaceScope}`;
         const raw = localStorage.getItem(storageKey);
         if (cancelled) return;
-        applyRawState(raw);
+        if (useWorkspaceStore.getState().activeWorkspace?.id !== workspaceId) return;
+        applyRawState(raw, workspaceId);
       } catch (err) {
         console.error("Failed to restore workspace sessions:", err);
         if (cancelled) return;
@@ -362,7 +398,15 @@ export function useAppLifecycle() {
     /** ~2MB budget for the legacy localStorage mirror (UTF-16 ≈ 2 bytes/char). */
     const LOCAL_MIRROR_CHAR_BUDGET = 1_000_000;
 
+    // Capture workspace id when scheduling — never write into a later workspace.
+    const workspaceId = useWorkspaceStore.getState().activeWorkspace?.id;
+    if (!workspaceId) return;
+
     const timer = window.setTimeout(() => {
+      // Ignore stale timers after a workspace switch.
+      if (useWorkspaceStore.getState().activeWorkspace?.id !== workspaceId) return;
+      if (!useSessionStore.getState().sessionStoreReady) return;
+
       const latest = useSessionStore.getState();
       const safeActive = latest.sessions.some((s) => s.id === latest.activeSessionId)
         ? latest.activeSessionId
@@ -403,7 +447,7 @@ export function useAppLifecycle() {
                 /* ignore */
               }
               // Prefer silent backend-only fallback; prompt at most once if needed later.
-              void Api.saveWorkspaceFrontendState(backendState)
+              void Api.saveWorkspaceFrontendState(workspaceId, backendState)
                 .then(() => {
                   /* backend has the full state — no popup required */
                 })
@@ -417,7 +461,7 @@ export function useAppLifecycle() {
         }
       }
 
-      void Api.saveWorkspaceFrontendState(backendState).catch((err) => {
+      void Api.saveWorkspaceFrontendState(workspaceId, backendState).catch((err) => {
         console.warn("Failed to persist workspace frontend state to backend:", err);
       });
     }, delayMs);

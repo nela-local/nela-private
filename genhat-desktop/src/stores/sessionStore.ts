@@ -7,6 +7,7 @@ import { createEmptySession } from "../app/sessionUtils";
 import { llamaContextKey, releaseLlamaSlot } from "../app/llamaSlotAffinity";
 import { useChatModeStore } from "./chatModeStore";
 import { useWorkspaceStore } from "./workspaceStore";
+import { patchParkedSession } from "../app/backgroundGenerationPark";
 
 // Module-level AbortControllers map for session management
 export const abortControllers = new Map<string, AbortController>();
@@ -88,14 +89,22 @@ export const useSessionStore = create<SessionState & SessionActions>((set, get) 
       }
     })),
   
-  updateSession: (sessionId, patch) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === sessionId
-          ? { ...session, ...(typeof patch === 'function' ? patch(session) : patch) }
-          : session
-      )
-    })),
+  updateSession: (sessionId, patch) => {
+    const state = get();
+    const exists = state.sessions.some((session) => session.id === sessionId);
+    if (exists) {
+      set({
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId
+            ? { ...session, ...(typeof patch === "function" ? patch(session) : patch) }
+            : session
+        ),
+      });
+      return;
+    }
+    // Session was detached by a workspace switch — keep the generation alive.
+    patchParkedSession(sessionId, patch);
+  },
   
   addNewSession: (hasActiveWorkspace) => {
     if (!hasActiveWorkspace) return;

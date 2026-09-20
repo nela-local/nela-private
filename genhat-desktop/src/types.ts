@@ -667,6 +667,8 @@ export interface HtmlPlan {
   source_rows?: string[][];
   /** Embedded images referenced by section image_index. */
   images?: ArtifactImageAsset[];
+  /** Keep artifact writes in the workspace that started the generation. */
+  workspace_id?: string;
 }
 
 export interface ArtifactResult {
