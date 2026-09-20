@@ -49,6 +49,8 @@
   --color-neon-hover: #00b8e6;
   --color-neon-subtle: rgba(0, 212, 255, 0.08);
   --color-neon-glow: rgba(0, 212, 255, 0.25);
+  --color-user-msg-bg: rgba(0, 180, 255, 0.18);
+  --color-user-msg-border: rgba(0, 180, 255, 0.28);
 
   --color-coral: #ff6b6b;
   --color-coral-subtle: rgba(255, 107, 107, 0.10);
@@ -133,6 +135,8 @@ html[data-theme="professional"] {
   --color-neon-hover: #095aa8;
   --color-neon-subtle: rgba(11, 107, 203, 0.08);
   --color-neon-glow: rgba(11, 107, 203, 0.15);
+  --color-user-msg-bg: #dbeafe;
+  --color-user-msg-border: #bfdbfe;
 
   --color-coral: #e05050;
   --color-coral-subtle: rgba(224, 80, 80, 0.10);
@@ -245,6 +249,8 @@ html[data-theme="light"] {
   --color-neon-hover: #007aaa;
   --color-neon-subtle: rgba(0, 153, 204, 0.10);
   --color-neon-glow: rgba(0, 153, 204, 0.22);
+  --color-user-msg-bg: #dbeafe;
+  --color-user-msg-border: #bfdbfe;
 
   --color-coral: #e05050;
   --color-coral-subtle: rgba(224, 80, 80, 0.10);

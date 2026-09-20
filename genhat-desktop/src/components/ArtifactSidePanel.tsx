@@ -182,6 +182,9 @@ export default function ArtifactSidePanel({
   const [sheetView, setSheetView] = useState<"sheet" | "code">("sheet");
   const [displayHtml, setDisplayHtml] = useState("");
   const [hydratedHtml, setHydratedHtml] = useState("");
+  const [tallyOfflineNotice, setTallyOfflineNotice] = useState<string | null>(
+    null
+  );
   const [xlsxRows, setXlsxRows] = useState<string[][] | null>(null);
   const [xlsxSheetName, setXlsxSheetName] = useState("Sheet1");
   const [xlsxSheets, setXlsxSheets] = useState<
@@ -284,6 +287,7 @@ export default function ArtifactSidePanel({
       setXlsxSheets(null);
       setHydratedHtml("");
       setDisplayHtml("");
+      setTallyOfflineNotice(null);
       paintedOnce.current = false;
       setEditDraft("");
       cancelImagePicker();
@@ -292,6 +296,7 @@ export default function ArtifactSidePanel({
       // Switching between artifacts — drop prior body so we reload from disk.
       setHydratedHtml("");
       setDisplayHtml("");
+      setTallyOfflineNotice(null);
       setXlsxRows(null);
       setXlsxSheets(null);
       setActiveSlideIndex(null);
@@ -328,20 +333,66 @@ export default function ArtifactSidePanel({
     }
     if (html && html.trim().length > 0) return;
     let cancelled = false;
-    Api.readFileText(savedPath)
-      .then((text) => {
-        if (cancelled || !text?.trim()) return;
-        setHydratedHtml(text);
-        setDisplayHtml(prepareArtifactHtmlPreview(text));
+    void (async () => {
+      try {
+        const { resolveDashboardPreviewHtml } = await import(
+          "../app/tallyDashboardSnapshotCache"
+        );
+        const resolved = await resolveDashboardPreviewHtml(savedPath);
+        if (cancelled || !resolved.html?.trim()) return;
+        setHydratedHtml(resolved.html);
+        setDisplayHtml(resolved.html);
+        setTallyOfflineNotice(resolved.offlineNotice);
         paintedOnce.current = true;
-      })
-      .catch((err) => {
+      } catch (err) {
         console.warn("Failed to reload HTML artifact from disk:", err);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [savedPath, type, html]);
+
+  // Live Tally offline: if the panel already has a live shell and Tally is down,
+  // swap to the last shown / cached snapshot.
+  useEffect(() => {
+    if (
+      type !== "text/html" ||
+      !savedPath ||
+      streamActive ||
+      !displayHtml ||
+      !/data-nela-tally-live/i.test(displayHtml)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const liveHtml = displayHtml;
+    void (async () => {
+      try {
+        const status = await Api.tallyStatus();
+        if (cancelled) return;
+        if (status.connected) {
+          const { refreshTallySnapshotCache } = await import(
+            "../app/tallyDashboardSnapshotCache"
+          );
+          void refreshTallySnapshotCache(savedPath, liveHtml);
+          return;
+        }
+        const { loadLastShownTallySnapshot, TALLY_OFFLINE_NOTICE } =
+          await import("../app/tallyDashboardSnapshotCache");
+        const cached = await loadLastShownTallySnapshot(savedPath);
+        if (cancelled || !cached) return;
+        setDisplayHtml(cached);
+        setHydratedHtml(cached);
+        setTallyOfflineNotice(TALLY_OFFLINE_NOTICE);
+      } catch {
+        /* keep live shell */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPath, type, streamActive, displayHtml]);
 
   // Load real .xlsx grid after save / restore.
   useEffect(() => {
@@ -631,13 +682,54 @@ export default function ArtifactSidePanel({
     return () => window.removeEventListener("message", onMessage);
   }, [editBusy, savedPath, activeSlideIndex, type, editOpen]);
 
-  // Live Tally dashboard: iframe postMessage → Api.tally* → response
+  // Live Tally dashboard: iframe postMessage → Api.tally* → response.
+  // Cache successful live tabs; on disconnect swap to last-shown snapshot.
   useEffect(() => {
+    const isLive = Boolean(
+      displayHtml && /data-nela-tally-live/i.test(displayHtml)
+    );
+    if (!isLive && !savedPath) {
+      const detach = attachTallyLiveBridge(
+        () => previewIframeRef.current?.contentWindow ?? null
+      );
+      return () => detach();
+    }
+    if (!isLive) return;
+
     const detach = attachTallyLiveBridge(
-      () => previewIframeRef.current?.contentWindow ?? null
+      () => previewIframeRef.current?.contentWindow ?? null,
+      {
+        artifactPath: savedPath ?? null,
+        liveHtml: displayHtml,
+        onDisconnected: () => {
+          if (!savedPath) {
+            setTallyOfflineNotice("Tally is offline.");
+            return;
+          }
+          void (async () => {
+            const { loadLastShownTallySnapshot, TALLY_OFFLINE_NOTICE } =
+              await import("../app/tallyDashboardSnapshotCache");
+            const cached = await loadLastShownTallySnapshot(savedPath);
+            if (cached) {
+              setDisplayHtml(cached);
+              setHydratedHtml(cached);
+              setTallyOfflineNotice(TALLY_OFFLINE_NOTICE);
+            } else {
+              setTallyOfflineNotice(
+                "Tally is offline and no previously loaded data is available yet."
+              );
+            }
+          })();
+        },
+      }
     );
     return () => detach();
-  }, []);
+    // Re-bind when path or live-ness changes, not on every HTML token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    savedPath,
+    Boolean(displayHtml && /data-nela-tally-live/i.test(displayHtml)),
+  ]);
 
   /** Preview srcDoc — gate library rail; inject click-to-select while Edit is open. */
   const iframeSrcDoc = useMemo(() => {
@@ -989,6 +1081,11 @@ export default function ArtifactSidePanel({
           <X size={16} />
         </button>
       </header>
+      {tallyOfflineNotice && type === "text/html" && (
+        <div className="px-3 py-1.5 text-[0.72rem] text-amber-200/90 bg-amber-500/10 border-b border-amber-400/20 shrink-0">
+          {tallyOfflineNotice}
+        </div>
+      )}
       <div className="flex-1 min-h-0 bg-void-900 flex flex-col">
         <div className="flex-1 min-h-0">
           {type === "text/csv" ? (

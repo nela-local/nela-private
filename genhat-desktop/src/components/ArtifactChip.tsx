@@ -95,11 +95,11 @@ export default function ArtifactChip({
         : "HTML artifact";
 
   return (
-    <div className="mt-3 flex items-stretch gap-1.5 max-w-full">
+    <div className="mt-3 max-w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-glass-border bg-void-700">
       <button
         type="button"
         onClick={onTogglePanel}
-        className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] hover:border-neon/30 transition text-left"
+        className="flex-1 min-w-0 flex items-center gap-2.5 text-left hover:opacity-90 transition"
         title={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
       >
         {loading ? (
@@ -115,52 +115,62 @@ export default function ArtifactChip({
             {loading ? "Generating…" : kindLabel}
           </span>
         </span>
-        {panelOpen ? (
-          <PanelRightClose size={15} className="text-txt-muted shrink-0" />
-        ) : (
-          <PanelRightOpen size={15} className="text-txt-muted shrink-0" />
-        )}
       </button>
-      {driveConn && (
+      <div className="flex items-center gap-0.5 shrink-0">
+        {driveConn && (
+          <button
+            type="button"
+            onClick={onSaveToDrive}
+            disabled={!path || savingDrive || loading}
+            className="p-1.5 rounded-lg text-txt-muted hover:text-neon hover:bg-glass-hover transition disabled:opacity-40 disabled:pointer-events-none"
+            title="Save to Google Drive"
+            aria-label="Save to Google Drive"
+          >
+            {savingDrive ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <CloudUpload size={15} />
+            )}
+          </button>
+        )}
         <button
           type="button"
-          onClick={onSaveToDrive}
-          disabled={!path || savingDrive || loading}
-          className="shrink-0 px-3 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] hover:border-neon/30 transition disabled:opacity-40 disabled:pointer-events-none text-txt-muted hover:text-neon"
-          title="Save to Google Drive"
-          aria-label="Save to Google Drive"
+          onClick={onDownload}
+          disabled={!path || downloading || loading}
+          className="p-1.5 rounded-lg text-txt-muted hover:text-neon hover:bg-glass-hover transition disabled:opacity-40 disabled:pointer-events-none"
+          title={
+            path
+              ? isPresentation
+                ? "Download as PowerPoint, PDF, Word, or HTML"
+                : "Download as Word or HTML"
+              : "Download available when ready"
+          }
+          aria-label={
+            isPresentation
+              ? "Download presentation as PowerPoint"
+              : "Download artifact"
+          }
         >
-          {savingDrive ? (
-            <Loader2 size={16} className="animate-spin" />
+          {downloading ? (
+            <Loader2 size={15} className="animate-spin" />
           ) : (
-            <CloudUpload size={16} />
+            <Download size={15} />
           )}
         </button>
-      )}
-      <button
-        type="button"
-        onClick={onDownload}
-        disabled={!path || downloading || loading}
-        className="shrink-0 px-3 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] hover:border-neon/30 transition disabled:opacity-40 disabled:pointer-events-none text-txt-muted hover:text-neon"
-        title={
-          path
-            ? isPresentation
-              ? "Download as PowerPoint, PDF, Word, or HTML"
-              : "Download as Word or HTML"
-            : "Download available when ready"
-        }
-        aria-label={
-          isPresentation
-            ? "Download presentation as PowerPoint"
-            : "Download artifact"
-        }
-      >
-        {downloading ? (
-          <Loader2 size={16} className="animate-spin" />
-        ) : (
-          <Download size={16} />
-        )}
-      </button>
+        <button
+          type="button"
+          onClick={onTogglePanel}
+          className="p-1.5 rounded-lg text-txt-muted hover:text-neon hover:bg-glass-hover transition"
+          title={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
+          aria-label={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
+        >
+          {panelOpen ? (
+            <PanelRightClose size={15} />
+          ) : (
+            <PanelRightOpen size={15} />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

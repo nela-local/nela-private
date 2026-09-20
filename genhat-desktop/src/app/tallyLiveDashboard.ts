@@ -22,6 +22,7 @@ export type TallyLiveDashboardOptions = {
 
 export const NELA_TALLY_REQUEST = "nela-tally-request";
 export const NELA_TALLY_RESPONSE = "nela-tally-response";
+export const NELA_TALLY_SELECTION = "nela-tally-selection";
 
 export type TallyLiveRequestKind =
   | "status"
@@ -281,6 +282,7 @@ export function buildTallyLiveDashboardHtml(
 (function () {
   var REQ = "${NELA_TALLY_REQUEST}";
   var RES = "${NELA_TALLY_RESPONSE}";
+  var SEL = "${NELA_TALLY_SELECTION}";
   var focus = document.body.getAttribute("data-focus") || "daybook";
   var pending = {};
   var charts = { a: null, b: null, c: null };
@@ -300,6 +302,22 @@ export function buildTallyLiveDashboardHtml(
   }
 
   function $(id) { return document.getElementById(id); }
+  function publishSelection() {
+    var from = ($("fromDate") && $("fromDate").value) || null;
+    var to = ($("toDate") && $("toDate").value) || null;
+    document.body.setAttribute("data-from", from || "");
+    document.body.setAttribute("data-to", to || "");
+    document.body.setAttribute("data-focus", focus);
+    if (!embedded) return;
+    try {
+      window.parent.postMessage({
+        type: SEL,
+        fromDate: from,
+        toDate: to,
+        focus: focus
+      }, "*");
+    } catch (_e) { /* ignore */ }
+  }
   function setStatus(msg, kind) {
     var el = $("status");
     el.textContent = msg;
@@ -809,6 +827,7 @@ export function buildTallyLiveDashboardHtml(
     setStatus("Refreshing from Tally…");
     var from = $("fromDate").value || null;
     var to = $("toDate").value || null;
+    publishSelection();
     try {
       var st = await request("status");
       if (!st.ok) {
@@ -850,6 +869,7 @@ export function buildTallyLiveDashboardHtml(
       tab.classList.add("active");
       focus = tab.getAttribute("data-focus") || "daybook";
       document.body.setAttribute("data-focus", focus);
+      publishSelection();
       refresh();
     });
   });
@@ -863,7 +883,14 @@ export function buildTallyLiveDashboardHtml(
     applyTrendChart();
   });
   $("refreshBtn").addEventListener("click", refresh);
+  ["fromDate", "toDate"].forEach(function (id) {
+    var el = $(id);
+    if (!el) return;
+    el.addEventListener("change", publishSelection);
+    el.addEventListener("input", publishSelection);
+  });
   window.addEventListener("resize", resizeCharts);
+  publishSelection();
   refresh();
 })();
   </script>

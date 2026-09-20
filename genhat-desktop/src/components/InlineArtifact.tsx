@@ -7,9 +7,9 @@ import GenerationProgressLabel from "./GenerationProgressLabel";
 import { Api } from "../api";
 import { downloadArtifactCopy, exportArtifactDeck, exportArtifactDocx } from "../app/artifactDownload";
 import type { DeckExportFormat } from "../app/exportDeck";
-import { prepareArtifactHtmlPreview } from "../app/artifactHtmlPreview";
 import { isPresentationPreviewHtml } from "../app/presentationPreviewSelect";
 import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
+import { readTallyLiveSelectionFromWindow } from "../app/tallyLiveSelection";
 
 export interface InlineArtifactProps {
   artifactPath?: string | null;
@@ -197,20 +197,24 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
 
     let cancelled = false;
 
-    Api.readFileText(currentPath)
-      .then((html) => {
+    void (async () => {
+      try {
+        const { resolveDashboardPreviewHtml } = await import(
+          "../app/tallyDashboardSnapshotCache"
+        );
+        const resolved = await resolveDashboardPreviewHtml(currentPath);
         if (cancelled) return;
-        setArtifactHtml(prepareArtifactHtmlPreview(html));
-        setIsPresentationHtml(isPresentationPreviewHtml(html));
+        setArtifactHtml(resolved.html);
+        setIsPresentationHtml(isPresentationPreviewHtml(resolved.html));
         setShowPreview(true);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("Failed to load HTML artifact:", err);
         if (!cancelled) {
           setArtifactHtml(null);
           setIsPresentationHtml(false);
         }
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -221,10 +225,24 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
   useEffect(() => {
     if (!artifactHtml || !/data-nela-tally-live/i.test(artifactHtml)) return;
     const detach = attachTallyLiveBridge(
-      () => iframeRef.current?.contentWindow ?? null
+      () => iframeRef.current?.contentWindow ?? null,
+      {
+        artifactPath: currentPath,
+        liveHtml: artifactHtml,
+        onDisconnected: () => {
+          if (!currentPath) return;
+          void (async () => {
+            const { loadLastShownTallySnapshot } = await import(
+              "../app/tallyDashboardSnapshotCache"
+            );
+            const cached = await loadLastShownTallySnapshot(currentPath);
+            if (cached) setArtifactHtml(cached);
+          })();
+        },
+      }
     );
     return () => detach();
-  }, [artifactHtml]);
+  }, [artifactHtml, currentPath]);
 
   const filename = currentPath ? currentPath.split(/[/\\]/).pop() : "artifact";
   const isHtml = currentPath ? (currentPath.endsWith(".html") || currentPath.endsWith(".htm")) : false;
@@ -238,10 +256,14 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
       setExportError(null);
       setExporting(kind);
       try {
+        const tallySelection = readTallyLiveSelectionFromWindow(
+          iframeRef.current?.contentWindow
+        );
+        const opts = tallySelection ? { tallySelection } : undefined;
         if (kind === "html" || kind === "copy") {
-          await downloadArtifactCopy(currentPath);
+          await downloadArtifactCopy(currentPath, opts);
         } else if (kind === "docx") {
-          await exportArtifactDocx(currentPath);
+          await exportArtifactDocx(currentPath, opts);
         } else {
           await exportArtifactDeck(currentPath, kind);
         }

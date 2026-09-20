@@ -8,9 +8,11 @@ import PodcastTab from "./PodcastTab";
 import ChatWindow from "./ChatWindow";
 import MindMapOverlay from "./MindMapOverlay";
 import ArtifactSidePanel from "./ArtifactSidePanel";
+import DashboardGallery from "./DashboardGallery";
 import { lazy, Suspense } from "react";
 import { useSessionStore } from "../stores/sessionStore";
 import { useArtifactStreamStore } from "../stores/artifactStreamStore";
+import { useUIStore } from "../stores/uiStore";
 import { handlePreviewArtifactEdit } from "../app/sessionSendActions";
 
 const PdfViewer = lazy(() => import("./PdfViewer"));
@@ -132,6 +134,7 @@ export default function AppMainContentArea({
   generalGenerationTime = null,
 }: AppMainContentAreaProps) {
   const updateSession = useSessionStore((s) => s.updateSession);
+  const sidebarSection = useUIStore((s) => s.sidebarSection);
   const liveStreamHtml = useArtifactStreamStore((s) =>
     s.active && s.type === "text/html" ? s.html : ""
   );
@@ -181,6 +184,8 @@ export default function AppMainContentArea({
           currentMode={chatMode}
           onSelectMode={onSelectMode}
         />
+      ) : sidebarSection === "artifacts" ? (
+        <DashboardGallery />
       ) : !activeSession ? (
         <div className="flex-1 flex items-center justify-center text-txt-muted text-sm">
           {activeWorkspace

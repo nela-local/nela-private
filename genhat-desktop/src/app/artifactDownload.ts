@@ -12,6 +12,16 @@ import {
 } from "./exportDeck";
 import { documentExportBaseName, htmlToDocxBase64 } from "./htmlToDocx";
 import { isPresentationPreviewHtml } from "./presentationPreviewSelect";
+import {
+  isLiveTallyDashboardHtml,
+  materializeTallyDashboardSnapshot,
+  utf8ToBase64,
+} from "./tallyStaticDashboard";
+import {
+  getTallyLiveSelection,
+  tallySnapshotFileBase,
+  type TallyLiveSelection,
+} from "./tallyLiveSelection";
 
 function baseNameFromPath(path: string): string {
   const name = path.split(/[/\\]/).pop() ?? "artifact";
@@ -47,12 +57,20 @@ function ensureExtension(path: string, ext: string): string {
   return `${path}.${ext}`;
 }
 
+export type DownloadArtifactOptions = {
+  /** Current live dashboard period from the preview iframe (preferred over shell defaults). */
+  tallySelection?: TallyLiveSelection | null;
+};
+
 /**
  * Copy the artifact to a user-chosen path.
  * Slide decks default to PowerPoint; ordinary HTML pages default to .html
  * (Word is offered as an optional export, not the default).
  */
-export async function downloadArtifactCopy(sourcePath: string): Promise<string | null> {
+export async function downloadArtifactCopy(
+  sourcePath: string,
+  options?: DownloadArtifactOptions
+): Promise<string | null> {
   const ext = extensionOf(sourcePath) || "bin";
 
   if (ext === "html" || ext === "htm") {
@@ -61,7 +79,7 @@ export async function downloadArtifactCopy(sourcePath: string): Promise<string |
       if (isPresentationPreviewHtml(html)) {
         return downloadPresentationArtifact(sourcePath, html);
       }
-      return downloadHtmlDocumentArtifact(sourcePath, html);
+      return downloadHtmlDocumentArtifact(sourcePath, html, options);
     } catch (err) {
       console.warn("Could not inspect HTML artifact for export:", err);
     }
@@ -125,10 +143,77 @@ async function downloadPresentationArtifact(
   return finalPath;
 }
 
+function resolveTallySelection(
+  options?: DownloadArtifactOptions
+): TallyLiveSelection {
+  const remembered = getTallyLiveSelection();
+  const override = options?.tallySelection ?? {};
+  const pick = (
+    primary: string | null | undefined,
+    fallback: string | null | undefined
+  ) => {
+    const a = primary?.trim();
+    if (a) return a;
+    const b = fallback?.trim();
+    return b || null;
+  };
+  return {
+    fromDate: pick(override.fromDate, remembered.fromDate),
+    toDate: pick(override.toDate, remembered.toDate),
+    focus: override.focus ?? remembered.focus,
+    company: pick(override.company, remembered.company),
+  };
+}
+
 async function downloadHtmlDocumentArtifact(
   sourcePath: string,
-  html: string
+  html: string,
+  options?: DownloadArtifactOptions
 ): Promise<string | null> {
+  const isLiveTally = isLiveTallyDashboardHtml(html);
+
+  // Live Tally: fetch snapshot for the preview's current period first, then save.
+  if (isLiveTally) {
+    const selection = resolveTallySelection(options);
+    const { html: exportHtml, snapshot, title } =
+      await materializeTallyDashboardSnapshot(html, selection);
+    // Keep a local sidecar so gallery/offline can reuse the last good snapshot.
+    try {
+      const { writeTallySnapshotCache } = await import(
+        "./tallyDashboardSnapshotCache"
+      );
+      await writeTallySnapshotCache(sourcePath, exportHtml);
+    } catch {
+      /* cache is best-effort */
+    }
+    const defaultName = tallySnapshotFileBase({
+      company: snapshot.company || selection.company,
+      fromDate: snapshot.fromDate,
+      toDate: snapshot.toDate,
+      titleFallback: `${title}-snapshot`,
+    });
+    const targetPath = await save({
+      defaultPath: `${defaultName}.html`,
+      filters: [
+        { name: "HTML Document", extensions: ["html"] },
+        { name: "Word Document", extensions: ["docx"] },
+      ],
+    });
+    if (!targetPath) return null;
+
+    const picked = extensionOf(targetPath);
+    if (picked === "docx" || picked === "doc") {
+      const finalPath = ensureExtension(targetPath, "docx");
+      const base64 = await htmlToDocxBase64(exportHtml);
+      await Api.saveBinaryFile(finalPath, base64);
+      return finalPath;
+    }
+
+    const finalPath = ensureExtension(targetPath, "html");
+    await Api.saveBinaryFile(finalPath, utf8ToBase64(exportHtml));
+    return finalPath;
+  }
+
   const base = documentExportBaseName(html, sourcePath);
   const targetPath = await save({
     defaultPath: `${base}.html`,
@@ -140,7 +225,6 @@ async function downloadHtmlDocumentArtifact(
   if (!targetPath) return null;
 
   const picked = extensionOf(targetPath);
-  // Explicit Word choice only — never force .docx on plain webpage downloads.
   if (picked === "docx" || picked === "doc") {
     const finalPath = ensureExtension(targetPath, "docx");
     const base64 = await htmlToDocxBase64(html);
@@ -160,13 +244,37 @@ export async function exportArtifactDeck(
   return exportPresentation(htmlPath, format);
 }
 
-export async function exportArtifactDocx(htmlPath: string): Promise<string | null> {
-  const html = await Api.readFileText(htmlPath);
-  const base = isPresentationPreviewHtml(html)
-    ? presentationExportBaseName(html, htmlPath)
-    : documentExportBaseName(html, htmlPath);
+export async function exportArtifactDocx(
+  htmlPath: string,
+  options?: DownloadArtifactOptions
+): Promise<string | null> {
+  let html = await Api.readFileText(htmlPath);
+  let defaultBase: string;
+  if (isLiveTallyDashboardHtml(html)) {
+    const selection = resolveTallySelection(options);
+    const materialized = await materializeTallyDashboardSnapshot(html, selection);
+    html = materialized.html;
+    try {
+      const { writeTallySnapshotCache } = await import(
+        "./tallyDashboardSnapshotCache"
+      );
+      await writeTallySnapshotCache(htmlPath, html);
+    } catch {
+      /* cache is best-effort */
+    }
+    defaultBase = tallySnapshotFileBase({
+      company: materialized.snapshot.company || selection.company,
+      fromDate: materialized.snapshot.fromDate,
+      toDate: materialized.snapshot.toDate,
+      titleFallback: `${materialized.title}-snapshot`,
+    });
+  } else {
+    defaultBase = isPresentationPreviewHtml(html)
+      ? presentationExportBaseName(html, htmlPath)
+      : documentExportBaseName(html, htmlPath);
+  }
   const targetPath = await save({
-    defaultPath: `${base}.docx`,
+    defaultPath: `${defaultBase}.docx`,
     filters: [{ name: "Word Document", extensions: ["docx"] }],
   });
   if (!targetPath) return null;
