@@ -235,6 +235,104 @@ export function renameWorkspaceArtifact(
   return anyChanged;
 }
 
+/**
+ * Remove a dashboard from the gallery by stripping path refs from workspace
+ * sessions. Does not delete the HTML file on disk (other chats may share it).
+ */
+export function removeWorkspaceArtifact(path: string): boolean {
+  const target = path.trim();
+  if (!target) return false;
+
+  const { sessions, setSessions } = useSessionStore.getState();
+  let anyChanged = false;
+
+  const nextSessions = sessions.map((session) => {
+    let sessionChanged = false;
+
+    const strippedMessages = session.messages.map((msg) => {
+      if (msg.role !== "assistant") return msg;
+
+      const pathMatch = msg.artifactPath?.trim() === target;
+      const arts = msg.artifacts;
+      const artsMatch = arts?.some((a) => a.path?.trim() === target);
+      if (!pathMatch && !artsMatch) return msg;
+
+      sessionChanged = true;
+      anyChanged = true;
+
+      const remaining =
+        artsMatch && arts
+          ? arts.filter((a) => a.path?.trim() !== target)
+          : arts;
+
+      let next = { ...msg };
+      if (remaining && remaining.length > 0) {
+        next.artifacts = remaining;
+        if (pathMatch) {
+          next.artifactPath = remaining[0]!.path;
+          next.artifactTitle = remaining[0]!.title ?? msg.artifactTitle;
+        }
+      } else {
+        next = {
+          ...next,
+          artifacts: undefined,
+          artifactPath: undefined,
+          artifactTitle: undefined,
+          artifactStage: undefined,
+        };
+      }
+      return next;
+    });
+
+    // Drop import stubs that no longer reference any artifact.
+    const dropIdx = new Set<number>();
+    for (let i = 0; i < strippedMessages.length; i += 1) {
+      const msg = strippedMessages[i]!;
+      if (msg.role !== "assistant") continue;
+      const emptyArtifact =
+        !msg.artifactPath &&
+        !(msg.artifacts && msg.artifacts.length > 0) &&
+        /^Added [“"]/.test(msg.content ?? "");
+      if (!emptyArtifact) continue;
+      dropIdx.add(i);
+      if (
+        i > 0 &&
+        strippedMessages[i - 1]?.role === "user" &&
+        /^Import dashboard:/i.test(strippedMessages[i - 1]!.content ?? "")
+      ) {
+        dropIdx.add(i - 1);
+      }
+      sessionChanged = true;
+      anyChanged = true;
+    }
+
+    const messages =
+      dropIdx.size > 0
+        ? strippedMessages.filter((_, i) => !dropIdx.has(i))
+        : strippedMessages;
+
+    let result = sessionChanged ? { ...session, messages } : session;
+    if (session.artifactPath?.trim() === target) {
+      anyChanged = true;
+      result = {
+        ...result,
+        messages: sessionChanged ? messages : result.messages,
+        artifactPath: undefined,
+        artifactStage: undefined,
+        artifactPanelOpen: false,
+        streamingArtifactTitle: undefined,
+        streamingArtifactHtml: undefined,
+      };
+    }
+    return result;
+  });
+
+  if (anyChanged) {
+    setSessions(nextSessions);
+  }
+  return anyChanged;
+}
+
 const IMPORTED_DASHBOARDS_SESSION_TITLE = "Imported dashboards";
 
 /** Persist an imported HTML path so the gallery lists it (workspace-scoped). */
