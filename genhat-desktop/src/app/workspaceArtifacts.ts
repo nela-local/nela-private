@@ -5,7 +5,9 @@
 
 import { useMemo } from "react";
 import { looksLikePresentationTitle } from "./artifactDownload";
+import { Api } from "../api";
 import type { ChatSession } from "../types";
+import { createEmptySession } from "./sessionUtils";
 import { useSessionStore } from "../stores/sessionStore";
 
 export type ArtifactKind = "dashboard" | "presentation" | "spreadsheet" | "page";
@@ -231,4 +233,114 @@ export function renameWorkspaceArtifact(
     setSessions(nextSessions);
   }
   return anyChanged;
+}
+
+const IMPORTED_DASHBOARDS_SESSION_TITLE = "Imported dashboards";
+
+/** Persist an imported HTML path so the gallery lists it (workspace-scoped). */
+export function registerImportedDashboard(
+  path: string,
+  title: string
+): WorkspaceArtifactItem {
+  const trimmedPath = path.trim();
+  const trimmedTitle = title.trim() || filenameTitle(trimmedPath);
+  const { sessions, setSessions, updateSession } = useSessionStore.getState();
+
+  let session = sessions.find(
+    (s) => s.title === IMPORTED_DASHBOARDS_SESSION_TITLE
+  );
+  if (!session) {
+    session = {
+      ...createEmptySession(),
+      title: IMPORTED_DASHBOARDS_SESSION_TITLE,
+    };
+    setSessions([...sessions, session]);
+  }
+
+  updateSession(session.id, (prev) => ({
+    messages: [
+      ...prev.messages,
+      {
+        id: crypto.randomUUID(),
+        role: "user" as const,
+        content: `Import dashboard: ${trimmedTitle}`,
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant" as const,
+        content: `Added “${trimmedTitle}” to your dashboards.`,
+        artifactPath: trimmedPath,
+        artifactTitle: trimmedTitle,
+        artifactStage: "LivePreview",
+        artifacts: [
+          { path: trimmedPath, title: trimmedTitle, kind: "dashboard" },
+        ],
+      },
+    ],
+    artifactPath: trimmedPath,
+    artifactStage: "LivePreview",
+    streamingArtifactTitle: trimmedTitle,
+  }));
+
+  return {
+    key: trimmedPath,
+    path: trimmedPath,
+    title: trimmedTitle,
+    kind: "dashboard",
+    sessionId: session.id,
+    prompt: `Import dashboard: ${trimmedTitle}`,
+    sortIndex: Number.MAX_SAFE_INTEGER,
+  };
+}
+
+/**
+ * Open a file picker, copy the HTML into the app artifacts folder,
+ * and register it in the current workspace gallery.
+ */
+export async function importDashboardFromFile(): Promise<WorkspaceArtifactItem | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    title: "Import dashboard",
+    multiple: false,
+    filters: [{ name: "HTML Dashboard", extensions: ["html", "htm"] }],
+  });
+  if (!selected || Array.isArray(selected)) return null;
+
+  const sourcePath = selected;
+  const html = await Api.readFileText(sourcePath);
+  if (!html?.trim()) {
+    throw new Error("That file is empty.");
+  }
+
+  let title =
+    filenameTitle(sourcePath)
+      .replace(/\bsnapshot\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Imported Dashboard";
+
+  // Prefer <title> from the HTML when present.
+  const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  if (titleMatch?.[1]?.trim()) {
+    title = titleMatch[1].trim().slice(0, 120);
+  }
+
+  const destPath = await Api.writeArtifactCopy(sourcePath, html, title);
+
+  // If a sibling live-cache snapshot exists next to the source, copy it too.
+  try {
+    const { tallySnapshotCachePath, writeTallySnapshotCache } = await import(
+      "./tallyDashboardSnapshotCache"
+    );
+    const sibling = tallySnapshotCachePath(sourcePath);
+    if (sibling !== sourcePath) {
+      const snapHtml = await Api.readFileText(sibling).catch(() => null);
+      if (snapHtml?.trim()) {
+        await writeTallySnapshotCache(destPath, snapHtml);
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
+  return registerImportedDashboard(destPath, title);
 }

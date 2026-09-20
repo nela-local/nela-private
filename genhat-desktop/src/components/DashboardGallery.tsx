@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   Check,
+  FolderOpen,
   LayoutDashboard,
   Loader2,
   Maximize2,
@@ -26,10 +27,12 @@ import {
   TALLY_OFFLINE_NOTICE,
 } from "../app/tallyDashboardSnapshotCache";
 import {
+  importDashboardFromFile,
   renameWorkspaceArtifact,
   useWorkspaceDashboards,
   type WorkspaceArtifactItem,
 } from "../app/workspaceArtifacts";
+import { useUIStore } from "../stores/uiStore";
 
 const THUMB_INNER_W = 1280;
 const THUMB_INNER_H = 800;
@@ -508,7 +511,9 @@ function DashboardEnlargedView({
 
 export default function DashboardGallery() {
   const dashboards = useWorkspaceDashboards();
+  const showError = useUIStore((s) => s.showError);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const selected =
     selectedPath != null
@@ -520,6 +525,20 @@ export default function DashboardGallery() {
   const handleRename = useCallback((path: string, title: string) => {
     renameWorkspaceArtifact(path, title);
   }, []);
+
+  const handleImport = useCallback(async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const item = await importDashboardFromFile();
+      if (item) setSelectedPath(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showError(message || "Couldn't import that dashboard.", "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, showError]);
 
   useEffect(() => {
     if (selectedPath && !dashboards.some((d) => d.path === selectedPath)) {
@@ -542,12 +561,28 @@ export default function DashboardGallery() {
       className="flex-1 flex flex-col min-h-0 h-full overflow-hidden"
       data-tour="dashboard-gallery"
     >
-      <div className="px-6 pt-5 pb-3 shrink-0">
-        <h1 className="text-xl font-semibold text-txt">Dashboards</h1>
-        <p className="mt-1 text-[0.8rem] text-txt-muted">
-          Previews of dashboards generated in this workspace. Hover a name to
-          rename it.
-        </p>
+      <div className="px-6 pt-5 pb-3 shrink-0 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-txt">Dashboards</h1>
+          <p className="mt-1 text-[0.8rem] text-txt-muted">
+            Previews of dashboards generated in this workspace. Hover a name to
+            rename it.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 shrink-0 px-3 py-2 rounded-lg border border-glass-border bg-void-800 text-sm text-txt-secondary hover:text-neon hover:border-neon/40 hover:bg-neon-subtle transition-colors disabled:opacity-50"
+          onClick={() => void handleImport()}
+          disabled={importing}
+          data-tour="dashboard-gallery-import"
+        >
+          {importing ? (
+            <Loader2 size={16} className="animate-spin text-neon" />
+          ) : (
+            <FolderOpen size={16} />
+          )}
+          Import
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-8">
@@ -555,9 +590,22 @@ export default function DashboardGallery() {
           <div className="h-full min-h-[240px] flex flex-col items-center justify-center gap-3 text-center px-6">
             <LayoutDashboard size={40} className="text-neon/45" />
             <p className="text-txt-muted text-sm max-w-md leading-relaxed">
-              No dashboards yet. Ask in chat for a dashboard or live view — it
-              will appear here.
+              No dashboards yet. Ask in chat for a dashboard, or import an HTML
+              file.
             </p>
+            <button
+              type="button"
+              className="mt-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-neon/35 text-sm text-neon hover:bg-neon-subtle transition-colors disabled:opacity-50"
+              onClick={() => void handleImport()}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <FolderOpen size={16} />
+              )}
+              Import dashboard
+            </button>
           </div>
         ) : (
           <div
