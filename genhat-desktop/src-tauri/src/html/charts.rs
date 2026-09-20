@@ -587,21 +587,44 @@ fn echarts_option(
     let multi = series.len() >= 2;
 
     match chart_type {
-        ChartType::Pie => serde_json::json!({
-            "color": colors,
-            "tooltip": { "trigger": "item" },
-            "legend": { "orient": "horizontal", "bottom": 0 },
-            "series": [{
-                "name": title,
-                "type": "pie",
-                "radius": ["36%", "68%"],
-                "itemStyle": { "borderRadius": 6 },
-                "data": labels.iter().zip(values.iter()).map(|(name, value)| serde_json::json!({
-                    "name": name,
-                    "value": value
-                })).collect::<Vec<_>>()
-            }]
-        }),
+        ChartType::Pie => {
+            let many = labels.len() > 6;
+            serde_json::json!({
+                "color": colors,
+                "tooltip": { "trigger": "item", "formatter": "{b}: {c} ({d}%)" },
+                "legend": {
+                    "type": if many { "scroll" } else { "plain" },
+                    "orient": "horizontal",
+                    "bottom": 4,
+                    "left": "center",
+                    "width": "92%",
+                    "itemWidth": 10,
+                    "itemHeight": 10,
+                    "itemGap": 10,
+                    "textStyle": { "fontSize": 11 },
+                    "pageIconSize": 10,
+                    "pageTextStyle": { "fontSize": 10 }
+                },
+                "series": [{
+                    "name": title,
+                    "type": "pie",
+                    "radius": if many { ["26%", "48%"] } else { ["30%", "55%"] },
+                    "center": if many { ["50%", "40%"] } else { ["50%", "44%"] },
+                    "avoidLabelOverlap": true,
+                    "label": {
+                        "show": !many,
+                        "formatter": "{b}",
+                        "fontSize": 11
+                    },
+                    "labelLine": { "show": !many, "length": 12, "length2": 8 },
+                    "itemStyle": { "borderRadius": 6 },
+                    "data": labels.iter().zip(values.iter()).map(|(name, value)| serde_json::json!({
+                        "name": name,
+                        "value": value
+                    })).collect::<Vec<_>>()
+                }]
+            })
+        }
         ChartType::Line | ChartType::Timeline | ChartType::DualLine => {
             let area = matches!(chart_type, ChartType::Line | ChartType::Timeline) && !multi;
             serde_json::json!({

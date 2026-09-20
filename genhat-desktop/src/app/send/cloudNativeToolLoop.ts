@@ -1861,6 +1861,7 @@ export async function runCloudArtifactChartPrep(opts: {
         content:
           `You prepare charts for a ${kind} the user will generate next. ` +
           "Call render_chart once per plot (max 4) with mixed chart_type (bar, pie, line, timeline, dual_line, grouped_bar), title, labels[], and values[]. " +
+          "Include at least one line/timeline when data has dates. For pie with many categories the host uses a scroll legend — prefer bar for 9+ groups. " +
           "Do not make every chart a bar. For dual_line or grouped_bar pass series: [{name, values}, ...]. " +
           "Use only numbers from the user request or the supplied data context — do not invent live APIs. " +
           "After charts are registered, reply with a one-line acknowledgement — do not write the artifact HTML.",

@@ -209,7 +209,9 @@ export function buildTallyLiveDashboardHtml(
       .chart-card.wide { grid-column: span 2; }
     }
     .chart-card h3 { margin: 0 0 .5rem; font-size: .9rem; overflow: hidden; }
-    .chart-host { width: 100%; height: 260px; }
+    .chart-host { width: 100%; height: 280px; }
+    .chart-card:has(#chart-a) .chart-host,
+    .chart-host.pie-host { height: 320px; }
     .table-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
       padding: .75rem 1rem 1rem; overflow: auto;
@@ -454,12 +456,28 @@ export function buildTallyLiveDashboardHtml(
     var values = cfg.values || [];
     var option;
     if (type === "pie") {
+      var many = labels.length > 6;
       option = {
         color: PALETTE,
-        tooltip: { trigger: "item" },
+        tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+        legend: {
+          type: many ? "scroll" : "plain",
+          orient: "horizontal",
+          bottom: 4,
+          left: "center",
+          width: "92%",
+          itemWidth: 10,
+          itemHeight: 10,
+          textStyle: { fontSize: 11 },
+          pageIconSize: 10
+        },
         series: [{
           type: "pie",
-          radius: ["35%", "65%"],
+          radius: many ? ["26%", "48%"] : ["30%", "55%"],
+          center: ["50%", many ? "40%" : "44%"],
+          avoidLabelOverlap: true,
+          label: { show: !many, formatter: "{b}", fontSize: 11 },
+          labelLine: { show: !many, length: 12, length2: 8 },
           data: labels.map(function (l, i) { return { name: l, value: values[i] || 0 }; })
         }]
       };

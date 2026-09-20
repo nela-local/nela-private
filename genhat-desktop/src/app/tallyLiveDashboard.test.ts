@@ -50,6 +50,8 @@ describe("tallyLiveDashboard", () => {
     assert.match(html, /type === "line"/);
     assert.match(html, /renderSales/);
     assert.match(html, /renderCashBank/);
+    assert.match(html, /type: many \? "scroll" : "plain"/);
+    assert.match(html, /center: \["50%", many \? "40%" : "44%"\]/);
   });
 
   it("normalizes input dates and focuses", () => {

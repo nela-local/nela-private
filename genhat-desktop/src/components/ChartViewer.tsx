@@ -78,6 +78,77 @@ function sanitizeOption(option: Record<string, unknown>): EChartsOption {
   if (next.tooltip === undefined) {
     next.tooltip = { trigger: "item" };
   }
+
+  // Pie/donut: never let a bottom legend collide with the ring or with callouts.
+  const seriesRaw = next.series;
+  const seriesList = Array.isArray(seriesRaw)
+    ? seriesRaw
+    : seriesRaw && typeof seriesRaw === "object"
+      ? [seriesRaw]
+      : [];
+  const pieSeries = seriesList.filter(
+    (s) =>
+      s &&
+      typeof s === "object" &&
+      (s as { type?: string }).type === "pie"
+  ) as Array<Record<string, unknown>>;
+  if (pieSeries.length > 0) {
+    const sliceCount = pieSeries.reduce((n, s) => {
+      const data = s.data;
+      return n + (Array.isArray(data) ? data.length : 0);
+    }, 0);
+    const many = sliceCount > 6;
+    next.legend = {
+      ...(typeof next.legend === "object" &&
+      next.legend !== null &&
+      !Array.isArray(next.legend)
+        ? (next.legend as Record<string, unknown>)
+        : {}),
+      // Force safe placement even if the model set conflicting legend props.
+      type: many ? "scroll" : "plain",
+      orient: "horizontal",
+      bottom: 4,
+      left: "center",
+      width: "92%",
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { fontSize: 11 },
+      pageIconSize: 10,
+    };
+    next.series = seriesList.map((raw) => {
+      if (!raw || typeof raw !== "object") return raw;
+      const s = { ...(raw as Record<string, unknown>) };
+      if (s.type !== "pie") return s;
+      s.radius = many ? ["26%", "48%"] : ["30%", "55%"];
+      s.center = ["50%", many ? "40%" : "44%"];
+      s.avoidLabelOverlap = true;
+      // Prefer legend over external callouts when many slices (prevents double labeling + overlap).
+      const prevLabel =
+        typeof s.label === "object" && s.label !== null && !Array.isArray(s.label)
+          ? (s.label as Record<string, unknown>)
+          : {};
+      s.label = {
+        ...prevLabel,
+        show: !many,
+        formatter: "{b}",
+        fontSize: 11,
+      };
+      const prevLine =
+        typeof s.labelLine === "object" &&
+        s.labelLine !== null &&
+        !Array.isArray(s.labelLine)
+          ? (s.labelLine as Record<string, unknown>)
+          : {};
+      s.labelLine = {
+        ...prevLine,
+        show: !many,
+        length: 12,
+        length2: 8,
+      };
+      return s;
+    });
+  }
+
   return next as EChartsOption;
 }
 
@@ -91,6 +162,14 @@ const ChartInner: React.FC<ChartViewerProps> = ({
   const [copied, setCopied] = React.useState(false);
   const resolvedTheme = resolveTheme(theme);
   const safeOption = React.useMemo(() => sanitizeOption(option), [option]);
+  const pieLike = React.useMemo(() => {
+    const series = safeOption.series;
+    const list = Array.isArray(series) ? series : series ? [series] : [];
+    return list.some(
+      (s) => s && typeof s === "object" && (s as { type?: string }).type === "pie"
+    );
+  }, [safeOption]);
+  const resolvedHeight = pieLike && height === "400px" ? "440px" : height;
 
   const downloadImage = () => {
     const instance = chartRef.current?.getEchartsInstance();
@@ -157,7 +236,7 @@ const ChartInner: React.FC<ChartViewerProps> = ({
           </button>
         </div>
       </div>
-      <div className="chart-viewer__body" style={{ height }}>
+      <div className="chart-viewer__body" style={{ height: resolvedHeight }}>
         <ReactECharts
           ref={chartRef}
           option={safeOption}

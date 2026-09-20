@@ -274,7 +274,8 @@ export function buildTallyStaticDashboardHtml(
       padding: .75rem 1rem 1rem;
     }
     .chart-card h3 { margin: 0 0 .5rem; font-size: .9rem; }
-    .chart-host { width: 100%; height: 280px; }
+    .chart-host { width: 100%; height: 300px; }
+    .chart-host.pie-host { height: 360px; }
     .table-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
       padding: .75rem 1rem 1rem; overflow: auto;
@@ -309,8 +310,9 @@ export function buildTallyStaticDashboardHtml(
     <div id="mismatch"></div>
     <div class="kpis" id="kpi-grid"></div>
     <div class="charts">
-      <div class="chart-card"><h3 id="chart-mix-title">Breakdown</h3><div class="chart-host" id="chart-mix"></div></div>
+      <div class="chart-card"><h3 id="chart-mix-title">Breakdown</h3><div class="chart-host pie-host" id="chart-mix"></div></div>
       <div class="chart-card"><h3 id="chart-trend-title">Trend</h3><div class="chart-host" id="chart-trend"></div></div>
+      <div class="chart-card"><h3 id="chart-rank-title">Ranking</h3><div class="chart-host" id="chart-rank"></div></div>
     </div>
     <div class="table-card">
       <h3 id="table-title">Details</h3>
@@ -324,6 +326,8 @@ export function buildTallyStaticDashboardHtml(
   var focus = document.body.getAttribute("data-focus") || "daybook";
   var chartMix = null;
   var chartTrend = null;
+  var chartRank = null;
+  var PALETTE = ["#2563eb", "#0ea5e9", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#64748b", "#059669", "#d97706", "#7c3aed", "#0891b2", "#ca8a04"];
   var snap = null;
   try {
     var el = document.getElementById("tally-snapshot");
@@ -385,6 +389,57 @@ export function buildTallyStaticDashboardHtml(
     if (typeof echarts === "undefined") return;
     if (!chartMix) chartMix = echarts.init($("chart-mix"), null, { renderer: "svg" });
     if (!chartTrend) chartTrend = echarts.init($("chart-trend"), null, { renderer: "svg" });
+    if (!chartRank) chartRank = echarts.init($("chart-rank"), null, { renderer: "svg" });
+  }
+  function setPie(chart, labels, values) {
+    if (!chart) return;
+    var many = labels.length > 6;
+    chart.setOption({
+      color: PALETTE,
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+      legend: {
+        type: many ? "scroll" : "plain",
+        orient: "horizontal",
+        bottom: 4,
+        left: "center",
+        width: "92%",
+        itemWidth: 10,
+        itemHeight: 10,
+        textStyle: { fontSize: 11 },
+        pageIconSize: 10
+      },
+      series: [{
+        type: "pie",
+        radius: many ? ["26%", "48%"] : ["30%", "55%"],
+        center: ["50%", many ? "40%" : "44%"],
+        avoidLabelOverlap: true,
+        label: { show: !many, formatter: "{b}", fontSize: 11 },
+        labelLine: { show: !many, length: 12, length2: 8 },
+        data: labels.map(function (l, i) { return { name: l, value: values[i] || 0 }; })
+      }]
+    }, true);
+  }
+  function setLine(chart, labels, values) {
+    if (!chart) return;
+    chart.setOption({
+      color: PALETTE,
+      tooltip: { trigger: "axis" },
+      grid: { left: 48, right: 16, top: 24, bottom: 32 },
+      xAxis: { type: "category", data: labels, boundaryGap: false },
+      yAxis: { type: "value" },
+      series: [{ type: "line", smooth: true, areaStyle: { opacity: 0.08 }, data: values, itemStyle: { color: "#2563eb" } }]
+    }, true);
+  }
+  function setBar(chart, labels, values, rotate) {
+    if (!chart) return;
+    chart.setOption({
+      color: PALETTE,
+      tooltip: { trigger: "axis" },
+      grid: { left: 48, right: 16, top: 24, bottom: rotate ? 72 : 32 },
+      xAxis: { type: "category", data: labels, axisLabel: rotate ? { rotate: 30 } : {} },
+      yAxis: { type: "value" },
+      series: [{ type: "bar", data: values, itemStyle: { color: "#2563eb" } }]
+    }, true);
   }
   function setKpis(items) {
     var grid = $("kpi-grid");
@@ -412,9 +467,11 @@ export function buildTallyStaticDashboardHtml(
     setKpis([]);
     $("chart-mix-title").textContent = "Breakdown";
     $("chart-trend-title").textContent = "Trend";
+    $("chart-rank-title").textContent = "Ranking";
     $("table-title").textContent = "Details";
     if (chartMix) chartMix.clear();
     if (chartTrend) chartTrend.clear();
+    if (chartRank) chartRank.clear();
     $("table-wrap").innerHTML = '<p class="empty">' + (payload && payload.error ? payload.error : "No data for this tab.") + "</p>";
     setStatus(payload && payload.error ? payload.error : "Tab unavailable in this snapshot.", "error");
   }
@@ -442,6 +499,7 @@ export function buildTallyStaticDashboardHtml(
     var total = 0;
     var byType = {};
     var byDay = {};
+    var byParty = {};
     for (var j = 0; j < filtered.length; j++) {
       var row = filtered[j];
       var amt = Math.abs(parseAmt(row.amount));
@@ -450,34 +508,29 @@ export function buildTallyStaticDashboardHtml(
       byType[vt] = (byType[vt] || 0) + (Number.isFinite(amt) ? amt : 0);
       var day = normalizeDate(row.date) || "unknown";
       byDay[day] = (byDay[day] || 0) + (Number.isFinite(amt) ? amt : 1);
+      var party = (row.party || "Unknown").trim() || "Unknown";
+      byParty[party] = (byParty[party] || 0) + (Number.isFinite(amt) ? amt : 0);
     }
+    var dayKeys = Object.keys(byDay).sort();
+    var avgDay = dayKeys.length ? total / dayKeys.length : 0;
     setKpis([
       { label: "Vouchers", value: String(filtered.length) },
       { label: "Total value", value: money(total) },
+      { label: "Avg / day", value: money(avgDay) },
       { label: "Types", value: String(Object.keys(byType).length) },
       { label: "Company", value: (metaObj && metaObj.company) || "—" }
     ]);
     $("chart-mix-title").textContent = "Amount by voucher type";
     $("chart-trend-title").textContent = "Activity by day";
+    $("chart-rank-title").textContent = "Top parties";
     $("table-title").textContent = "Voucher detail";
     ensureCharts();
     var typeLabels = Object.keys(byType);
-    var typeVals = typeLabels.map(function (k) { return byType[k]; });
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: typeLabels.map(function (l, i) { return { name: l, value: typeVals[i] }; }) }]
-      }, true);
-    }
-    var days = Object.keys(byDay).sort();
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        xAxis: { type: "category", data: days },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: days.map(function (d) { return byDay[d]; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setPie(chartMix, typeLabels, typeLabels.map(function (k) { return byType[k]; }));
+    setLine(chartTrend, dayKeys, dayKeys.map(function (d) { return byDay[d]; }));
+    var parties = Object.keys(byParty).map(function (k) { return { name: k, val: byParty[k] }; })
+      .sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
+    setBar(chartRank, parties.map(function (p) { return p.name.slice(0, 18); }), parties.map(function (p) { return p.val; }), true);
     setTable(
       ["Date", "Type", "Party", "Amount", "Narration"],
       filtered.map(function (r) {
@@ -504,39 +557,31 @@ export function buildTallyStaticDashboardHtml(
       }
       return t;
     }
+    function topN(list, n) {
+      return list.map(function (l) {
+        return { name: l.name, val: Math.abs(parseAmt(l.closingBalance || l.closing_balance)) };
+      }).filter(function (x) { return Number.isFinite(x.val); })
+        .sort(function (a, b) { return b.val - a.val; }).slice(0, n);
+    }
     var rTot = sum(recv);
     var pTot = sum(pay);
     setKpis([
       { label: "Receivables", value: money(rTot) },
       { label: "Payables", value: money(pTot) },
+      { label: "Net (R−P)", value: money(rTot - pTot) },
       { label: "Debtors", value: String(recv.length) },
       { label: "Creditors", value: String(pay.length) }
     ]);
     $("chart-mix-title").textContent = "Receivables vs payables";
-    $("chart-trend-title").textContent = "Top parties";
+    $("chart-trend-title").textContent = "Top debtors";
+    $("chart-rank-title").textContent = "Top creditors";
     $("table-title").textContent = "Outstanding ledgers";
     ensureCharts();
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: [
-          { name: "Receivables", value: rTot },
-          { name: "Payables", value: pTot }
-        ]}]
-      }, true);
-    }
-    var combined = recv.concat(pay).map(function (l) {
-      return { name: l.name, val: Math.abs(parseAmt(l.closingBalance || l.closing_balance)), parent: l.parent || "" };
-    }).filter(function (x) { return Number.isFinite(x.val); }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        grid: { left: 40, right: 16, top: 24, bottom: 64 },
-        xAxis: { type: "category", data: combined.map(function (c) { return c.name.slice(0, 18); }), axisLabel: { rotate: 30 } },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: combined.map(function (c) { return c.val; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setPie(chartMix, ["Receivables", "Payables"], [rTot, pTot]);
+    var debtors = topN(recv, 12);
+    setBar(chartTrend, debtors.map(function (c) { return c.name.slice(0, 18); }), debtors.map(function (c) { return c.val; }), true);
+    var creditors = topN(pay, 12);
+    setBar(chartRank, creditors.map(function (c) { return c.name.slice(0, 18); }), creditors.map(function (c) { return c.val; }), true);
     setTable(
       ["Ledger", "Group", "Balance"],
       recv.concat(pay).map(function (l) {
@@ -550,54 +595,38 @@ export function buildTallyStaticDashboardHtml(
     var rows = (payload && (payload.rows || payload.ledgers)) || [];
     var debitTot = 0;
     var creditTot = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var d = Math.abs(parseAmt(rows[i].debit));
-      var c = Math.abs(parseAmt(rows[i].credit));
-      var closing = parseAmt(rows[i].closingBalance || rows[i].closing_balance);
+    var enriched = rows.map(function (r) {
+      var d = Math.abs(parseAmt(r.debit));
+      var c = Math.abs(parseAmt(r.credit));
+      var closing = parseAmt(r.closingBalance || r.closing_balance);
       if (Number.isFinite(d) && d > 0) debitTot += d;
       else if (Number.isFinite(closing) && closing < 0) debitTot += Math.abs(closing);
       if (Number.isFinite(c) && c > 0) creditTot += c;
       else if (Number.isFinite(closing) && closing > 0 && !(Number.isFinite(d) && d > 0)) creditTot += closing;
-    }
+      var debit = Number.isFinite(d) ? d : (Number.isFinite(closing) && closing < 0 ? Math.abs(closing) : 0);
+      var credit = Number.isFinite(c) ? c : (Number.isFinite(closing) && closing > 0 ? closing : 0);
+      var net = Math.abs(Number.isFinite(closing) ? closing : debit - credit);
+      return { name: r.name, debit: debit, credit: credit, net: net };
+    });
     setKpis([
       { label: "Accounts", value: String(rows.length) },
       { label: "Debit (Dr)", value: money(debitTot) },
       { label: "Credit (Cr)", value: money(creditTot) },
+      { label: "Imbalance", value: money(Math.abs(debitTot - creditTot)) },
       { label: "Company", value: (metaObj && metaObj.company) || "—" }
     ]);
     $("chart-mix-title").textContent = "Debit vs credit";
     $("chart-trend-title").textContent = "Top accounts";
+    $("chart-rank-title").textContent = "Composition (abs balance)";
     $("table-title").textContent = "Trial balance";
     ensureCharts();
-    if (chartMix) {
-      chartMix.setOption({
-        tooltip: { trigger: "item" },
-        series: [{ type: "pie", radius: ["35%", "65%"], data: [
-          { name: "Debit", value: debitTot || 0 },
-          { name: "Credit", value: creditTot || 0 }
-        ]}]
-      }, true);
-    }
-    var top = rows.map(function (r) {
-      var d = Math.abs(parseAmt(r.debit));
-      var c = Math.abs(parseAmt(r.credit));
-      var net = Math.abs(parseAmt(r.closingBalance || r.closing_balance));
-      var val = Math.max(
-        Number.isFinite(d) ? d : 0,
-        Number.isFinite(c) ? c : 0,
-        Number.isFinite(net) ? net : 0
-      );
-      return { name: r.name, val: val };
-    }).filter(function (x) { return Number.isFinite(x.val) && x.val > 0; }).sort(function (a, b) { return b.val - a.val; }).slice(0, 12);
-    if (chartTrend) {
-      chartTrend.setOption({
-        tooltip: { trigger: "axis" },
-        grid: { left: 40, right: 16, top: 24, bottom: 64 },
-        xAxis: { type: "category", data: top.map(function (c) { return c.name.slice(0, 18); }), axisLabel: { rotate: 30 } },
-        yAxis: { type: "value" },
-        series: [{ type: "bar", data: top.map(function (c) { return c.val; }), itemStyle: { color: "#2563eb" } }]
-      }, true);
-    }
+    setPie(chartMix, ["Debit", "Credit"], [debitTot || 0, creditTot || 0]);
+    var top = enriched.filter(function (x) { return x.net > 0; })
+      .sort(function (a, b) { return b.net - a.net; }).slice(0, 12);
+    setBar(chartTrend, top.map(function (c) { return c.name.slice(0, 18); }), top.map(function (c) { return c.net; }), true);
+    // Prefer a bar ranking for many groups (avoids overcrowded pie legends).
+    var groupPie = top.slice(0, 8);
+    setBar(chartRank, groupPie.map(function (c) { return c.name.slice(0, 18); }), groupPie.map(function (c) { return c.net; }), true);
     setTable(
       ["Account", "Debit (Dr)", "Credit (Cr)", "Net"],
       rows.slice(0, 80).map(function (r) {
@@ -626,6 +655,7 @@ export function buildTallyStaticDashboardHtml(
     else renderTrial(payload, meta);
     if (chartMix) chartMix.resize();
     if (chartTrend) chartTrend.resize();
+    if (chartRank) chartRank.resize();
   }
 
   document.querySelectorAll(".tab").forEach(function (tab) {
@@ -640,6 +670,7 @@ export function buildTallyStaticDashboardHtml(
   window.addEventListener("resize", function () {
     if (chartMix) chartMix.resize();
     if (chartTrend) chartTrend.resize();
+    if (chartRank) chartRank.resize();
   });
   showFocus();
 })();

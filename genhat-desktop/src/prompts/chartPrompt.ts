@@ -51,6 +51,8 @@ Rules:
 - Always include responsive tooltips (tooltip.trigger = "axis" for cartesian, "item" for pie/radar/treemap/gauge).
 - Always set grid: { containLabel: true } for cartesian charts (and sensible left/right/top/bottom margins).
 - Include a readable legend when there are multiple series; keep legend text short.
+- For pie/donut charts: NEVER put a bottom legend under a large ring — use legend.type="scroll", radius around ["26%","48%"], center near ["50%","40%"], and turn OFF slice label/labelLine when there are more than 6 categories (legend only). Do not show both external callouts and a legend.
+- Prefer a line or bar chart for trends over time; reserve pie for share/composition of a few categories.
 - Use an accessible color palette with sufficient contrast (avoid low-contrast yellow-on-white / gray-on-gray). Prefer a clear categorical palette such as ["#2563eb","#059669","#d97706","#dc2626","#7c3aed","#0891b2","#ca8a04"].
 - Prefer static data already present in the conversation — do not invent live endpoints.
 - Recheck every numeric series, axis scale, percentage, and total before emitting the chart JSON. Do not invent or mis-scale figures.

@@ -94,6 +94,10 @@ describe("tallyStaticDashboard", () => {
     assert.match(html, /echarts@5\.5\.1/);
     assert.match(html, /Static snapshot/);
     assert.match(html, /Acme/);
+    assert.match(html, /id="chart-rank"/);
+    assert.match(html, /function setPie/);
+    assert.match(html, /function setLine/);
+    assert.match(html, /type: many \? "scroll" : "plain"/);
   });
 
   it("includes tab errors in snapshot JSON when present", () => {

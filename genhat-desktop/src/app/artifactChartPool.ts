@@ -157,15 +157,37 @@ export function buildEchartsOption(input: {
   const multi = series.length >= 2;
 
   if (input.chart_type === "pie") {
+    const many = labels.length > 6;
     return {
       color: colors,
-      tooltip: { trigger: "item" },
-      legend: { orient: "horizontal", bottom: 0 },
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+      legend: {
+        type: many ? "scroll" : "plain",
+        orient: "horizontal",
+        bottom: 4,
+        left: "center",
+        width: "92%",
+        itemWidth: 10,
+        itemHeight: 10,
+        itemGap: 10,
+        textStyle: { fontSize: 11 },
+        pageIconSize: 10,
+        pageTextStyle: { fontSize: 10 },
+      },
       series: [
         {
           name: title,
           type: "pie",
-          radius: ["36%", "68%"],
+          // Leave room for the bottom legend; avoid callouts when many slices.
+          radius: many ? ["26%", "48%"] : ["30%", "55%"],
+          center: ["50%", many ? "40%" : "44%"],
+          avoidLabelOverlap: true,
+          label: {
+            show: !many,
+            formatter: "{b}",
+            fontSize: 11,
+          },
+          labelLine: { show: !many, length: 12, length2: 8 },
           itemStyle: { borderRadius: 6 },
           data: labels.map((name, i) => ({ name, value: values[i]! })),
         },
@@ -273,7 +295,7 @@ function buildFragment(
     (safeTitle
       ? `<figcaption style="margin:0 0 .75rem;font-weight:600">${safeTitle}</figcaption>`
       : "") +
-    `<div class="echarts-host" id="${id}" style="width:100%;height:360px;min-height:320px"></div>` +
+    `<div class="echarts-host" id="${id}" style="width:100%;height:${chartType === "pie" ? "420px" : "360px"};min-height:${chartType === "pie" ? "380px" : "320px"}"></div>` +
     `<script type="application/json" class="echarts-option" id="${id}-option">${optionJson}</script>` +
     `</figure>`
   );

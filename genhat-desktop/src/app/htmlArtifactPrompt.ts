@@ -209,7 +209,9 @@ Section kind reference:
 - GRID: items = cards (menu items, features, products) — use meta for price
 - SPLIT: body = long about/story paragraph
 - STATS: items = metrics (label = number, detail = label text) — auto-filled when source data attached
-- CHART: chart_type required; mix types from the data: bar (ranking), pie (share), line/timeline (over time), dual_line (two measures), grouped_bar (side-by-side comparison)
+- CHART: chart_type required; mix types from the data: bar (ranking), pie (share of ≤8 categories), line/timeline (over time), dual_line (two measures), grouped_bar (side-by-side comparison)
+- For pie charts with many categories: host rendering uses a scroll legend and shrinks the ring — do not also invent external callout labels. Prefer a horizontal bar for 9+ groups.
+- Dashboards should include at least one trend (line/timeline) when the data has a time dimension.
 - IMAGE: full-width illustration; set image_index from the image catalog when available
 - QUOTES: items = testimonials (label = quote, detail = attribution)
 - FAQ: items = questions (label = Q, detail = A)
