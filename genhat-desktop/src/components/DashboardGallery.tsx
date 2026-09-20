@@ -10,11 +10,15 @@ import {
 import {
   ArrowLeft,
   Check,
+  FolderOpen,
   LayoutDashboard,
+  LayoutGrid,
+  List,
   Loader2,
   Maximize2,
   Minimize2,
   Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
@@ -26,24 +30,66 @@ import {
   TALLY_OFFLINE_NOTICE,
 } from "../app/tallyDashboardSnapshotCache";
 import {
+  importDashboardFromFile,
+  removeWorkspaceArtifact,
   renameWorkspaceArtifact,
   useWorkspaceDashboards,
   type WorkspaceArtifactItem,
 } from "../app/workspaceArtifacts";
+import { useUIStore } from "../stores/uiStore";
 
 const THUMB_INNER_W = 1280;
 const THUMB_INNER_H = 800;
 
-function DashboardTitleEditor({
+type GalleryLayout = "grid" | "list";
+type ThumbSize = "S" | "M" | "L";
+
+const LAYOUT_KEY = "nela.dashboardGallery.layout";
+const SIZE_KEY = "nela.dashboardGallery.thumbSize";
+
+const THUMB_MIN: Record<ThumbSize, number> = {
+  S: 160,
+  M: 240,
+  L: 320,
+};
+
+function loadLayout(): GalleryLayout {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    if (v === "list" || v === "grid") return v;
+  } catch {
+    /* ignore */
+  }
+  return "grid";
+}
+
+function loadThumbSize(): ThumbSize {
+  try {
+    const v = localStorage.getItem(SIZE_KEY);
+    if (v === "S" || v === "M" || v === "L") return v;
+  } catch {
+    /* ignore */
+  }
+  return "M";
+}
+
+function DashboardItemActions({
   title,
-  onSave,
+  onRename,
+  onDelete,
   className = "",
   inputClassName = "",
+  alwaysShowActions = false,
+  wrapTitle = false,
 }: {
   title: string;
-  onSave: (next: string) => void;
+  onRename: (next: string) => void;
+  onDelete?: () => void;
   className?: string;
   inputClassName?: string;
+  alwaysShowActions?: boolean;
+  /** When true, show the full name with wrapping instead of truncating. */
+  wrapTitle?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -63,7 +109,7 @@ function DashboardTitleEditor({
   const commit = () => {
     const next = draft.trim();
     setEditing(false);
-    if (next && next !== title) onSave(next);
+    if (next && next !== title) onRename(next);
     else setDraft(title);
   };
 
@@ -82,6 +128,10 @@ function DashboardTitleEditor({
       cancel();
     }
   };
+
+  const actionBtnClass = alwaysShowActions
+    ? "opacity-100"
+    : "opacity-0 group-hover:opacity-100";
 
   if (editing) {
     return (
@@ -125,11 +175,15 @@ function DashboardTitleEditor({
   }
 
   return (
-    <div className={`flex items-center gap-1.5 min-w-0 ${className}`}>
-      <span className={`truncate min-w-0 ${inputClassName}`}>{title}</span>
+    <div className={`flex items-start gap-1 min-w-0 ${className}`}>
+      <span
+        className={`min-w-0 flex-1 ${wrapTitle ? "whitespace-normal break-words" : "truncate"} ${inputClassName}`}
+      >
+        {title}
+      </span>
       <button
         type="button"
-        className="p-1 rounded text-txt-muted opacity-0 group-hover:opacity-100 hover:text-neon hover:bg-neon-subtle shrink-0 transition-opacity"
+        className={`p-1 rounded text-txt-muted hover:text-neon hover:bg-neon-subtle shrink-0 transition-opacity ${actionBtnClass}`}
         onClick={(e: ReactMouseEvent) => {
           e.stopPropagation();
           e.preventDefault();
@@ -141,6 +195,22 @@ function DashboardTitleEditor({
       >
         <Pencil size={13} />
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          className={`p-1 rounded text-txt-muted hover:text-red-400 hover:bg-red-500/10 shrink-0 transition-opacity ${actionBtnClass}`}
+          onClick={(e: ReactMouseEvent) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onDelete();
+          }}
+          title="Delete dashboard"
+          aria-label="Delete dashboard"
+          data-tour="dashboard-delete-btn"
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
     </div>
   );
 }
@@ -149,10 +219,12 @@ function DashboardThumbCard({
   item,
   onOpen,
   onRename,
+  onDelete,
 }: {
   item: WorkspaceArtifactItem;
   onOpen: () => void;
   onRename: (title: string) => void;
+  onDelete: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -198,7 +270,6 @@ function DashboardThumbCard({
 
     (async () => {
       try {
-        // Prefer cached snapshot for live Tally thumbs (shows real figures offline).
         const cached = await readTallySnapshotCache(item.path);
         if (cancelled) return;
         if (cached) {
@@ -283,13 +354,152 @@ function DashboardThumbCard({
         )}
       </div>
       <div className="px-3 py-2.5 min-w-0 w-full">
-        <DashboardTitleEditor
+        <DashboardItemActions
           title={item.title}
-          onSave={onRename}
+          onRename={onRename}
+          onDelete={onDelete}
           className="w-full"
           inputClassName="text-[0.88rem] font-medium text-txt group-hover:text-neon transition-colors"
         />
       </div>
+    </div>
+  );
+}
+
+const LIST_THUMB_W = 112;
+const LIST_THUMB_H = 70;
+
+function DashboardListRow({
+  item,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  item: WorkspaceArtifactItem;
+  onOpen: () => void;
+  onRename: (title: string) => void;
+  onDelete: () => void;
+}) {
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [html, setHtml] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const scale = LIST_THUMB_W / THUMB_INNER_W;
+
+  useEffect(() => {
+    const el = thumbRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "80px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    setLoading(true);
+    setFailed(false);
+
+    (async () => {
+      try {
+        const cached = await readTallySnapshotCache(item.path);
+        if (cancelled) return;
+        if (cached) {
+          setHtml(cached);
+          setLoading(false);
+          return;
+        }
+        const resolved = await resolveDashboardPreviewHtml(item.path);
+        if (cancelled) return;
+        setHtml(resolved.html);
+        setLoading(false);
+      } catch {
+        if (cancelled) return;
+        setHtml(null);
+        setFailed(true);
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, item.path]);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="group flex items-start gap-3 w-full text-left rounded-xl border-2 border-glass-border bg-void-800/80 px-3 py-2.5 transition-all duration-150 hover:border-neon/45 hover:bg-void-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neon/50 cursor-pointer"
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      title={item.title}
+      data-tour="dashboard-gallery-list-item"
+    >
+      <div
+        ref={thumbRef}
+        className="relative shrink-0 overflow-hidden rounded-lg border border-glass-border bg-void-900"
+        style={{ width: LIST_THUMB_W, height: LIST_THUMB_H }}
+      >
+        {loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center text-txt-muted">
+            <Loader2 size={16} className="animate-spin text-neon" />
+          </div>
+        )}
+        {failed && !loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <LayoutDashboard size={18} className="text-neon/55" />
+          </div>
+        )}
+        {html && (
+          <div
+            className="pointer-events-none origin-top-left"
+            style={
+              {
+                width: THUMB_INNER_W,
+                height: THUMB_INNER_H,
+                transform: `scale(${scale})`,
+              } as CSSProperties
+            }
+          >
+            <iframe
+              title={`${item.title} preview`}
+              srcDoc={html}
+              sandbox="allow-scripts"
+              className="w-full h-full border-0 bg-white"
+              tabIndex={-1}
+            />
+          </div>
+        )}
+        {!html && !loading && !failed && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <LayoutDashboard size={18} className="text-neon/40" />
+          </div>
+        )}
+      </div>
+      <DashboardItemActions
+        title={item.title}
+        onRename={onRename}
+        onDelete={onDelete}
+        className="flex-1 min-w-0 pt-0.5"
+        inputClassName="text-[0.9rem] font-medium text-txt leading-snug"
+        alwaysShowActions
+        wrapTitle
+      />
     </div>
   );
 }
@@ -450,10 +660,11 @@ function DashboardEnlargedView({
           Back
         </button>
         <div className="group flex-1 min-w-0">
-          <DashboardTitleEditor
+          <DashboardItemActions
             title={item.title}
-            onSave={onRename}
+            onRename={onRename}
             inputClassName="text-[0.95rem] font-medium text-txt"
+            alwaysShowActions
           />
         </div>
         {mode === "snapshot" && (
@@ -508,7 +719,12 @@ function DashboardEnlargedView({
 
 export default function DashboardGallery() {
   const dashboards = useWorkspaceDashboards();
+  const showError = useUIStore((s) => s.showError);
+  const confirmAction = useUIStore((s) => s.confirmAction);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [layout, setLayout] = useState<GalleryLayout>(() => loadLayout());
+  const [thumbSize, setThumbSize] = useState<ThumbSize>(() => loadThumbSize());
 
   const selected =
     selectedPath != null
@@ -519,6 +735,53 @@ export default function DashboardGallery() {
 
   const handleRename = useCallback((path: string, title: string) => {
     renameWorkspaceArtifact(path, title);
+  }, []);
+
+  const handleDelete = useCallback(
+    async (path: string, title: string) => {
+      const ok = await confirmAction(
+        "Delete dashboard",
+        `Remove “${title}” from this workspace gallery?`,
+        "Delete",
+        "Cancel"
+      );
+      if (!ok) return;
+      removeWorkspaceArtifact(path);
+      if (selectedPath === path) setSelectedPath(null);
+    },
+    [confirmAction, selectedPath]
+  );
+
+  const handleImport = useCallback(async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const item = await importDashboardFromFile();
+      if (item) setSelectedPath(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showError(message || "Couldn't import that dashboard.", "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, showError]);
+
+  const setLayoutPersist = useCallback((next: GalleryLayout) => {
+    setLayout(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setThumbSizePersist = useCallback((next: ThumbSize) => {
+    setThumbSize(next);
+    try {
+      localStorage.setItem(SIZE_KEY, next);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {
@@ -542,12 +805,93 @@ export default function DashboardGallery() {
       className="flex-1 flex flex-col min-h-0 h-full overflow-hidden"
       data-tour="dashboard-gallery"
     >
-      <div className="px-6 pt-5 pb-3 shrink-0">
-        <h1 className="text-xl font-semibold text-txt">Dashboards</h1>
-        <p className="mt-1 text-[0.8rem] text-txt-muted">
-          Previews of dashboards generated in this workspace. Hover a name to
-          rename it.
-        </p>
+      <div className="px-6 pt-5 pb-3 shrink-0 flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-txt">Dashboards</h1>
+          <p className="mt-1 text-[0.8rem] text-txt-muted">
+            Previews of dashboards generated in this workspace.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <div
+            className="inline-flex items-center rounded-lg border border-glass-border bg-void-800 p-0.5"
+            role="group"
+            aria-label="Gallery layout"
+          >
+            <button
+              type="button"
+              className={`p-1.5 rounded-md transition-colors ${
+                layout === "grid"
+                  ? "bg-neon-subtle text-neon"
+                  : "text-txt-muted hover:text-txt"
+              }`}
+              onClick={() => setLayoutPersist("grid")}
+              title="Grid view"
+              aria-label="Grid view"
+              aria-pressed={layout === "grid"}
+              data-tour="dashboard-gallery-layout-grid"
+            >
+              <LayoutGrid size={16} />
+            </button>
+            <button
+              type="button"
+              className={`p-1.5 rounded-md transition-colors ${
+                layout === "list"
+                  ? "bg-neon-subtle text-neon"
+                  : "text-txt-muted hover:text-txt"
+              }`}
+              onClick={() => setLayoutPersist("list")}
+              title="List view"
+              aria-label="List view"
+              aria-pressed={layout === "list"}
+              data-tour="dashboard-gallery-layout-list"
+            >
+              <List size={16} />
+            </button>
+          </div>
+
+          {layout === "grid" && (
+            <div
+              className="inline-flex items-center rounded-lg border border-glass-border bg-void-800 p-0.5"
+              role="group"
+              aria-label="Thumbnail size"
+            >
+              {(["S", "M", "L"] as ThumbSize[]).map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  className={`min-w-[1.75rem] px-2 py-1 rounded-md text-[0.72rem] font-semibold transition-colors ${
+                    thumbSize === size
+                      ? "bg-neon-subtle text-neon"
+                      : "text-txt-muted hover:text-txt"
+                  }`}
+                  onClick={() => setThumbSizePersist(size)}
+                  title={`Thumbnail size ${size}`}
+                  aria-label={`Thumbnail size ${size}`}
+                  aria-pressed={thumbSize === size}
+                  data-tour={`dashboard-gallery-size-${size.toLowerCase()}`}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 shrink-0 px-3 py-2 rounded-lg border border-glass-border bg-void-800 text-sm text-txt-secondary hover:text-neon hover:border-neon/40 hover:bg-neon-subtle transition-colors disabled:opacity-50"
+            onClick={() => void handleImport()}
+            disabled={importing}
+            data-tour="dashboard-gallery-import"
+          >
+            {importing ? (
+              <Loader2 size={16} className="animate-spin text-neon" />
+            ) : (
+              <FolderOpen size={16} />
+            )}
+            Import
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-8">
@@ -555,15 +899,40 @@ export default function DashboardGallery() {
           <div className="h-full min-h-[240px] flex flex-col items-center justify-center gap-3 text-center px-6">
             <LayoutDashboard size={40} className="text-neon/45" />
             <p className="text-txt-muted text-sm max-w-md leading-relaxed">
-              No dashboards yet. Ask in chat for a dashboard or live view — it
-              will appear here.
+              No dashboards yet. Ask in chat for a dashboard, or import an HTML
+              file.
             </p>
+            <button
+              type="button"
+              className="mt-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-neon/35 text-sm text-neon hover:bg-neon-subtle transition-colors disabled:opacity-50"
+              onClick={() => void handleImport()}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <FolderOpen size={16} />
+              )}
+              Import dashboard
+            </button>
+          </div>
+        ) : layout === "list" ? (
+          <div className="flex flex-col gap-2">
+            {dashboards.map((item) => (
+              <DashboardListRow
+                key={item.key}
+                item={item}
+                onOpen={() => setSelectedPath(item.path)}
+                onRename={(title) => handleRename(item.path, title)}
+                onDelete={() => void handleDelete(item.path, item.title)}
+              />
+            ))}
           </div>
         ) : (
           <div
             className="grid gap-4"
             style={{
-              gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+              gridTemplateColumns: `repeat(auto-fill, minmax(${THUMB_MIN[thumbSize]}px, 1fr))`,
             }}
           >
             {dashboards.map((item) => (
@@ -572,6 +941,7 @@ export default function DashboardGallery() {
                 item={item}
                 onOpen={() => setSelectedPath(item.path)}
                 onRename={(title) => handleRename(item.path, title)}
+                onDelete={() => void handleDelete(item.path, item.title)}
               />
             ))}
           </div>
