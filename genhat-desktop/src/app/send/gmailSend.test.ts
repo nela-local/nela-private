@@ -42,15 +42,11 @@ describe("parseGmailSendArgs", () => {
 });
 
 describe("looksLikeEmailRequest", () => {
-  it("detects send-mail phrasing", () => {
-    assert.equal(looksLikeEmailRequest("Email Priya that I will be late"), true);
-    assert.equal(looksLikeEmailRequest("write a mail to finance"), true);
+  it("no longer uses regex heuristics (always false)", () => {
+    assert.equal(looksLikeEmailRequest("Email Priya that I will be late"), false);
+    assert.equal(looksLikeEmailRequest("write a mail to finance"), false);
+    assert.equal(looksLikeEmailRequest("summarize my latest email"), false);
+    assert.equal(looksLikeEmailRequest("ten minute mail email ID"), false);
     assert.equal(looksLikeEmailRequest("What is the capital of France?"), false);
-  });
-
-  it("detects read/summarize phrasing", () => {
-    assert.equal(looksLikeEmailRequest("summarize my latest email"), true);
-    assert.equal(looksLikeEmailRequest("fetch my recent inbox"), true);
-    assert.equal(looksLikeEmailRequest("read my last email"), true);
   });
 });

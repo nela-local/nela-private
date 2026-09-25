@@ -10,6 +10,8 @@ use app_lib::commands::inference::TaskRouterState;
 use app_lib::commands::models::ProcessManagerState;
 use app_lib::commands::playground::PlaygroundState;
 use app_lib::commands::rag::RagPipelineState;
+use app_lib::commands::memory::MemoryEngineState;
+use app_lib::computer_use::ComputerUseState;
 use app_lib::commands::workspace::WorkspaceState;
 use app_lib::commands::download::DownloadState;
 use app_lib::governor::{Governor, GovernorState};
@@ -267,6 +269,23 @@ fn main() {
             app.manage(TaskRouterState(router.clone()));
             app.manage(RagPipelineState(RwLock::new(rag_pipeline)));
             app.manage(WorkspaceState(workspace_manager));
+            // Temporal memory (device-global)
+            let memory_engine = Arc::new(
+                app_lib::memory::MemoryEngine::open(&app_data_dir)
+                    .expect("Failed to initialize temporal memory"),
+            );
+            app.manage(MemoryEngineState(memory_engine.clone()));
+            {
+                let engine_maint = memory_engine.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    if let Err(e) = engine_maint.run_maintenance().await {
+                        log::warn!("memory maintenance: {e}");
+                    }
+                });
+            }
+            log::info!("Temporal memory layer ready");
+            app.manage(ComputerUseState::default());
             app.manage(DownloadState::default());
             app.manage(MicRecorderState::default());
             // Revamp state (P0–P4)
@@ -430,6 +449,25 @@ fn main() {
             app_lib::commands::rag::remove_watched_path,
             app_lib::commands::rag::list_watched_paths,
             app_lib::commands::rag::trigger_scan,
+            // Temporal memory commands
+            app_lib::commands::memory::memory_record_episode,
+            app_lib::commands::memory::memory_ingest_signal,
+            app_lib::commands::memory::memory_remember_fact,
+            app_lib::commands::memory::memory_assemble_context,
+            app_lib::commands::memory::memory_list_facts,
+            app_lib::commands::memory::memory_get_fact,
+            app_lib::commands::memory::memory_update_fact,
+            app_lib::commands::memory::memory_forget_fact,
+            app_lib::commands::memory::memory_delete_fact,
+            app_lib::commands::memory::memory_clear,
+            app_lib::commands::memory::memory_export_bundle,
+            app_lib::commands::memory::memory_import_bundle,
+            app_lib::commands::memory::memory_run_maintenance,
+            // Computer Use (jev-agent sidecar)
+            app_lib::commands::computer_use::computer_use_run,
+            app_lib::commands::computer_use::computer_use_respond,
+            app_lib::commands::computer_use::computer_use_cancel,
+            app_lib::commands::computer_use::computer_use_status,
             // Podcast commands
             app_lib::commands::podcast::generate_podcast,
             // System commands

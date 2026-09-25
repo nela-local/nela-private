@@ -61,6 +61,13 @@ async function withConfirm<T>(
     runningLabel: string;
   }
 ): Promise<T | { ok: false; reason: string }> {
+  const { requireTallyConnectorAccess } = await import("../tallyAccess");
+  if (!requireTallyConnectorAccess()) {
+    return {
+      ok: false,
+      reason: "tally_connector_locked",
+    };
+  }
   if (options?.signal?.aborted) {
     return { ok: false, reason: "user_cancelled" };
   }
@@ -289,6 +296,11 @@ export async function executeTallyLiveDashboard(
 
   if (options?.signal?.aborted) {
     return { ok: false, reason: "user_cancelled" };
+  }
+
+  const { requireTallyConnectorAccess } = await import("../tallyAccess");
+  if (!requireTallyConnectorAccess()) {
+    return { ok: false, reason: "tally_connector_locked" };
   }
 
   // Live dashboards are read-only and auto-approved (no Allow card).

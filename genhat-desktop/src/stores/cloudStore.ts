@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   getCloudEntitlement,
   createCloudCheckout,
+  createCloudAddonCheckout,
   openCloudPricing,
   openCloudBilling,
   confirmCloudCheckout,
@@ -69,14 +70,20 @@ function scheduleEntitlementRefresh() {
   }
 }
 
+export type UpgradeModalReason =
+  | "upgrade"
+  | "credits"
+  | "tally"
+  | "tally_needs_cloud";
+
 export interface CloudStoreState {
   preferredMode: CloudRoutingPreference;
   entitlement: EntitlementResponse | null;
   loading: boolean;
   error: string | null;
   upgradeModalOpen: boolean;
-  /** Why the upgrade modal opened — shapes copy toward packs vs plans. */
-  upgradeModalReason: "upgrade" | "credits";
+  /** Why the upgrade modal opened — shapes copy toward packs vs plans vs Tally. */
+  upgradeModalReason: UpgradeModalReason;
 
   setPreferredMode: (mode: CloudRoutingPreference) => void;
   refreshEntitlement: () => Promise<void>;
@@ -87,9 +94,13 @@ export interface CloudStoreState {
     trialExpiresAt?: string | null;
   }) => void;
   openCheckout: (plan: "starter" | "pro") => Promise<void>;
+  openAddonCheckout: (
+    addonId: "tally_connector",
+    interval: "month" | "year"
+  ) => Promise<void>;
   openBillingPage: () => Promise<void>;
   openPricingPage: () => Promise<void>;
-  openUpgradeModal: (reason?: "upgrade" | "credits") => void;
+  openUpgradeModal: (reason?: UpgradeModalReason) => void;
   closeUpgradeModal: () => void;
   confirmCheckout: () => Promise<boolean>;
   clearError: () => void;
@@ -189,6 +200,22 @@ export const useCloudStore = create<CloudStoreState>((set) => ({
     set({ loading: true, error: null });
     try {
       await createCloudCheckout(plan);
+      set({ loading: false, upgradeModalOpen: false });
+      scheduleEntitlementRefresh();
+    } catch (err) {
+      const message = toFriendly(err);
+      set({
+        loading: false,
+        error: message,
+      });
+      throw new Error(message);
+    }
+  },
+
+  openAddonCheckout: async (addonId, interval) => {
+    set({ loading: true, error: null });
+    try {
+      await createCloudAddonCheckout(addonId, interval);
       set({ loading: false, upgradeModalOpen: false });
       scheduleEntitlementRefresh();
     } catch (err) {

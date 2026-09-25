@@ -111,6 +111,24 @@ export async function handleTallyLiveRequest(
   }
 
   try {
+    const { hasTallyConnectorAccess } = await import("./tallyAccess");
+    if (!hasTallyConnectorAccess()) {
+      return {
+        type: NELA_TALLY_RESPONSE,
+        id: data.id,
+        ok: false,
+        kind,
+        error:
+          "Tally Connector is locked. Upgrade in Settings → Connections to enable live books.",
+        meta: {
+          host: null,
+          port: null,
+          company: null,
+          connected: false,
+        },
+      };
+    }
+
     const status = await Api.tallyStatus();
     meta = {
       host: status.host ?? null,

@@ -1,7 +1,12 @@
 import { useEffect } from "react";
-import { HardDrive, Loader2, Mail, MessageCircle, Plug, Calculator } from "lucide-react";
+import { HardDrive, Loader2, Mail, MessageCircle, Plug, Calculator, Lock } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 import { useConnectorStore } from "../stores/connectorStore";
+import { useCloudStore } from "../stores/cloudStore";
+import {
+  hasTallyConnectorAccess,
+  tallyUpgradeReason,
+} from "../app/tallyAccess";
 
 function iconFor(id: string, category?: string) {
   if (id === "gmail") return Mail;
@@ -11,8 +16,21 @@ function iconFor(id: string, category?: string) {
   return Plug;
 }
 
+function formatPeriodEnd(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function ConnectionsSettings() {
   const profile = useAuthStore((s) => s.profile);
+  const entitlement = useCloudStore((s) => s.entitlement);
+  const openUpgradeModal = useCloudStore((s) => s.openUpgradeModal);
   const providers = useConnectorStore((s) => s.providers);
   const connections = useConnectorStore((s) => s.connections);
   const busy = useConnectorStore((s) => s.busy);
@@ -23,6 +41,9 @@ export default function ConnectionsSettings() {
   const disconnect = useConnectorStore((s) => s.disconnect);
   const openModal = useConnectorStore((s) => s.openModal);
 
+  // Re-render when entitlement changes (tallyAccess reads store).
+  void entitlement;
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -31,6 +52,9 @@ export default function ConnectionsSettings() {
     (p) => p.available || p.comingSoon
   );
   const gmailConnected = connections.some((c) => c.providerId === "gmail");
+  const tallyUnlocked = hasTallyConnectorAccess();
+  const tallyAddon = entitlement?.addons?.tallyConnector;
+  const tallyActiveUntil = formatPeriodEnd(tallyAddon?.currentPeriodEnd);
 
   return (
     <div className="space-y-3">
@@ -65,15 +89,19 @@ export default function ConnectionsSettings() {
         const isStorage =
           p.id !== "tally" &&
           (p.capabilities ?? []).some((c) => ["browse", "sync"].includes(c));
+        const isTally = p.id === "tally";
+        const tallyLocked = isTally && !tallyUnlocked;
         const accountLabel = conn?.accountEmail
           ? `Connected as ${conn.accountEmail}`
           : conn?.remoteFolderName
             ? `Folder: ${conn.remoteFolderName}`
             : connected
               ? "Connected"
-              : p.comingSoon
-                ? "Coming soon"
-                : "Not connected";
+              : tallyLocked
+                ? "Add-on required"
+                : p.comingSoon
+                  ? "Coming soon"
+                  : "Not connected";
 
         const thisConnecting = connectingProviderId === p.id;
 
@@ -87,8 +115,19 @@ export default function ConnectionsSettings() {
             <div className="flex items-start gap-2 min-w-0">
               <Icon size={16} className="mt-0.5 shrink-0 text-txt-muted" />
               <div className="min-w-0">
-                <div className="text-[0.85rem] font-semibold text-txt">
+                <div className="text-[0.85rem] font-semibold text-txt flex items-center gap-1.5">
                   {p.displayName}
+                  {tallyLocked ? (
+                    <span className="inline-flex items-center gap-0.5 text-[0.68rem] font-medium text-txt-muted">
+                      <Lock size={11} />
+                      Locked
+                    </span>
+                  ) : null}
+                  {isTally && tallyUnlocked && tallyActiveUntil ? (
+                    <span className="text-[0.68rem] font-normal text-txt-muted">
+                      Active until {tallyActiveUntil}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="text-[0.78rem] text-txt-muted truncate">
                   {accountLabel}
@@ -107,6 +146,15 @@ export default function ConnectionsSettings() {
                 disabled
               >
                 Coming soon
+              </button>
+            ) : tallyLocked ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 py-1.5 px-3 text-[0.78rem] font-medium rounded-lg border border-glass-border bg-glass-bg text-txt-secondary hover:border-neon hover:text-neon shrink-0"
+                onClick={() => openUpgradeModal(tallyUpgradeReason())}
+              >
+                <Lock size={14} />
+                Unlock Tally
               </button>
             ) : connected ? (
               <div className="flex items-center gap-1.5 shrink-0">

@@ -763,6 +763,7 @@ mod tests {
     #[test]
     fn aggregates_csv_columns() {
         let mut plan = HtmlPlan {
+            workspace_id: None,
             title: "Sales".into(),
             tagline: None,
             archetype: "dashboard".into(),
@@ -830,6 +831,7 @@ mod tests {
         assert!((points.iter().find(|p| p.label == "A").unwrap().value - 1000.0).abs() < f64::EPSILON);
 
         let mut plan = HtmlPlan {
+            workspace_id: None,
             title: "Inventory".into(),
             tagline: None,
             archetype: "dashboard".into(),
@@ -885,6 +887,7 @@ mod tests {
     #[test]
     fn dual_series_aligns_on_first_measure_labels() {
         let mut plan = HtmlPlan {
+            workspace_id: None,
             title: "Inventory".into(),
             tagline: None,
             archetype: "dashboard".into(),

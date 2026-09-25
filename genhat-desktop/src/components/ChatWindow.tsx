@@ -29,6 +29,15 @@ import TelegramReadConfirmCard from "./TelegramReadConfirmCard";
 import DriveConnectCard from "./DriveConnectCard";
 import DriveAccessConfirmCard from "./DriveAccessConfirmCard";
 import TallyAccessConfirmCard from "./TallyAccessConfirmCard";
+import ComputerUseConfirmCard from "./ComputerUseConfirmCard";
+import ComputerUseStatusBar from "./ComputerUseStatusBar";
+import {
+  handleComputerUseEvent,
+  setComputerUseEnabled,
+  useComputerUseStore,
+  type ComputerUseEvent,
+} from "../stores/computerUseStore";
+import { listen } from "@tauri-apps/api/event";
 import ToolActivityTimeline from "./ToolActivityTimeline";
 import ReasoningDisclosure from "./ReasoningDisclosure";
 import { useGmailSendConfirmStore } from "../stores/gmailSendConfirmStore";
@@ -136,6 +145,8 @@ interface ChatWindowProps {
   streamingThinking?: string;
   thinkingEnabled?: boolean;
   onToggleThinking?: () => void;
+  /** Override title when the reasoning toggle is disabled (e.g. Cloud Fast). */
+  thinkingToggleHint?: string;
   saveAudioToSidebar?: (msgIdx: number) => void;
   session?: ChatSession;
 }
@@ -181,6 +192,7 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   streamingThinking = "",
   thinkingEnabled = false,
   onToggleThinking,
+  thinkingToggleHint,
   session,
 }) => {
   const { advanced } = useAdvancedMode();
@@ -401,6 +413,19 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
   const canToggleRag = chatMode === "text" && Boolean(onToggleRagEnabled);
   const canToggleWeb = chatMode === "text" && Boolean(onToggleWebEnabled);
   const canToggleFileIndexer = chatMode === "text" && Boolean(onToggleFileIndexerEnabled);
+  const computerUseEnabled = useComputerUseStore((s) => s.enabled);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<ComputerUseEvent>("computer-use-event", (ev) => {
+      handleComputerUseEvent(ev.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const renderToolsMenu = () => {
     return (
@@ -494,6 +519,38 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
             </span>
           </button>
 
+          <button
+            className={`w-full flex items-center justify-between gap-2 py-2 px-2.5 rounded-lg text-sm transition-all duration-150 ${
+              computerUseEnabled
+                ? "bg-neon-subtle text-neon"
+                : "text-txt-secondary hover:bg-glass-hover hover:text-txt"
+            } ${chatMode === "text" ? "" : "opacity-50 cursor-not-allowed"}`}
+            onClick={() => {
+              if (chatMode !== "text") return;
+              setComputerUseEnabled(!computerUseEnabled);
+            }}
+            title={
+              chatMode === "text"
+                ? "Let NELA operate your browser and desktop for concrete goals (requires approval)"
+                : "Available when chatting"
+            }
+            disabled={chatMode !== "text"}
+            aria-label="Computer Use"
+          >
+            <span className="text-[0.78rem] font-medium">Computer Use</span>
+            <span
+              className={`relative inline-flex h-4 w-8 rounded-full transition-colors ${
+                computerUseEnabled ? "bg-neon" : "bg-void-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
+                  computerUseEnabled ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+          </button>
+
           {advanced && (
             <button
               className={`w-full flex items-center justify-between gap-2 py-2 px-2.5 rounded-lg text-sm transition-all duration-150 ${
@@ -505,7 +562,11 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
                 if (!canToggleThinking) return;
                 onToggleThinking?.();
               }}
-              title={canToggleThinking ? COPY.toolShowReasoningHint : "Available when chatting"}
+              title={
+                canToggleThinking
+                  ? COPY.toolShowReasoningHint
+                  : thinkingToggleHint || "Available when chatting"
+              }
               disabled={!canToggleThinking}
               aria-label={COPY.toolShowReasoning}
             >
@@ -1065,6 +1126,8 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
         <DriveConnectCard />
         <DriveAccessConfirmCard />
         <TallyAccessConfirmCard />
+        <ComputerUseConfirmCard />
+        <ComputerUseStatusBar />
 
         {/* Response Time Timer - Audio Mode */}
         {chatMode === "audio" && ttsGenerating && (

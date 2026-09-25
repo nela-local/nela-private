@@ -60,7 +60,8 @@ interface AppMainContentAreaProps {
   onSaveAudioToSidebar: (msgIdx: number) => void;
   streamingThinking: string;
   thinkingEnabled: boolean;
-  onToggleThinking: () => void;
+  onToggleThinking?: () => void;
+  thinkingToggleHint?: string;
   activeMindmapOverlay: {
     sessionId: string;
     mindmapId: string | null;
@@ -121,6 +122,7 @@ export default function AppMainContentArea({
   streamingThinking,
   thinkingEnabled,
   onToggleThinking,
+  thinkingToggleHint,
   activeMindmapOverlay,
   activeMindmapGraph,
   onCloseMindmapOverlay,
@@ -243,6 +245,7 @@ export default function AppMainContentArea({
             streamingThinking={streamingThinking}
             thinkingEnabled={thinkingEnabled}
             onToggleThinking={onToggleThinking}
+            thinkingToggleHint={thinkingToggleHint}
             generalGenerating={generalGenerating}
             generalGenerationTime={generalGenerationTime}
           />

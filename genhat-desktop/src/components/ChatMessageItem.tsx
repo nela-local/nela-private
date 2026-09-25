@@ -315,7 +315,9 @@ function ChatMessageItemInner({
                           </div>
                         )}
                         {msg.content ? (
-                          <SlashHighlightedText text={msg.content} variant="bubble" />
+                          <div className="whitespace-pre-wrap break-words">
+                            <SlashHighlightedText text={msg.content} variant="bubble" />
+                          </div>
                         ) : null}
                       </div>
                       {msg.content?.trim() ? (

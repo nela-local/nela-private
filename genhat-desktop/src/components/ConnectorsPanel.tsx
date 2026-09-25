@@ -7,8 +7,14 @@ import {
   Unplug,
   ChevronRight,
   ArrowUp,
+  Lock,
 } from "lucide-react";
 import { useConnectorStore } from "../stores/connectorStore";
+import { useCloudStore } from "../stores/cloudStore";
+import {
+  hasTallyConnectorAccess,
+  tallyUpgradeReason,
+} from "../app/tallyAccess";
 import "./ConnectorsPanel.css";
 
 export default function ConnectorsPanel() {
@@ -31,6 +37,10 @@ export default function ConnectorsPanel() {
   const browseUp = useConnectorStore((s) => s.browseUp);
   const indexCurrentFolder = useConnectorStore((s) => s.indexCurrentFolder);
   const syncNow = useConnectorStore((s) => s.syncNow);
+  const entitlement = useCloudStore((s) => s.entitlement);
+  const openUpgradeModal = useCloudStore((s) => s.openUpgradeModal);
+  void entitlement;
+  const tallyUnlocked = hasTallyConnectorAccess();
 
   useEffect(() => {
     void refresh();
@@ -82,15 +92,27 @@ export default function ConnectorsPanel() {
                   const conn = connections.find((c) => c.providerId === p.id);
                   const connected = Boolean(conn);
                   const storage = isStorageProvider(p);
+                  const tallyLocked = p.id === "tally" && !tallyUnlocked;
                   return (
                     <div key={p.id} className="conn-provider-row">
                       <div>
-                        <div className="conn-provider-name">{p.displayName}</div>
+                        <div className="conn-provider-name">
+                          {p.displayName}
+                          {tallyLocked ? (
+                            <span className="conn-pill" style={{ marginLeft: 6 }}>
+                              Locked
+                            </span>
+                          ) : null}
+                        </div>
                         {connected ? (
                           <div className="conn-muted">
                             {conn?.accountEmail
                               ? `Connected as ${conn.accountEmail}`
                               : "Connected"}
+                          </div>
+                        ) : tallyLocked ? (
+                          <div className="conn-muted">
+                            Paid Cloud + Tally Connector add-on
                           </div>
                         ) : p.description ? (
                           <div className="conn-muted">{p.description}</div>
@@ -101,6 +123,15 @@ export default function ConnectorsPanel() {
                       </div>
                       {!p.available ? (
                         <span className="conn-pill">Soon</span>
+                      ) : tallyLocked ? (
+                        <button
+                          type="button"
+                          className="conn-btn primary"
+                          onClick={() => openUpgradeModal(tallyUpgradeReason())}
+                        >
+                          <Lock size={14} />
+                          Unlock
+                        </button>
                       ) : connected ? (
                         <div className="conn-conn-actions">
                           {storage && conn ? (

@@ -25,6 +25,8 @@ pub mod auth;
 pub mod cloud;
 pub mod connectors;
 pub mod rag;
+pub mod memory;
+pub mod computer_use;
 pub mod doc_graph;
 pub mod workspace;
 pub mod tts;

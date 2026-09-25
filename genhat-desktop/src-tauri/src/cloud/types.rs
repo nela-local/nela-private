@@ -161,12 +161,49 @@ pub struct EntitlementResponse {
     #[serde(default)]
     pub fast_free: Option<EntitlementFastFree>,
     pub limits: EntitlementLimits,
+    #[serde(default)]
+    pub addons: Option<EntitlementAddons>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitlementAddons {
+    #[serde(default)]
+    pub tally_connector: Option<TallyConnectorAddon>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TallyConnectorAddon {
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub interval: Option<String>,
+    #[serde(default)]
+    pub current_period_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutResponse {
-    pub checkout_url: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub checkout_url: Option<String>,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    #[serde(default)]
+    pub order_id: Option<String>,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub prefill_email: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -394,7 +431,14 @@ pub struct RefreshTokenResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutRequest {
-    pub plan: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub addon_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

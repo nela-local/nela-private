@@ -6,6 +6,8 @@ pub mod models;
 pub mod inference;
 pub mod audio;
 pub mod rag;
+pub mod memory;
+pub mod computer_use;
 pub mod doc_graph;
 pub mod podcast;
 pub mod workspace;

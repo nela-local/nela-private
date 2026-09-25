@@ -331,6 +331,76 @@ export const RENDER_CHART_TOOL: CloudToolDefinition = {
   },
 };
 
+/** Run a multi-step computer-use goal via the jev-agent sidecar. */
+export const COMPUTER_GOAL_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "computer_goal",
+    description:
+      "Control the user's computer to accomplish a concrete goal. " +
+      "Websites open in the user's Chrome via Browser Harness (indexed DOM clicks/typing — not a separate Chromium). " +
+      "Also supports desktop apps, local files (PDF viewer), and shell. " +
+      "Use when the user asks you to open sites, click UI, type into apps, open local files " +
+      "in system apps, or otherwise operate the machine — not for answering from knowledge alone. " +
+      "When opening a local file, put the absolute path from search_knowledge_base in the goal. " +
+      "The user must approve before actions run. Prefer a short, specific goal string.",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: {
+          type: "string",
+          description:
+            "Clear instruction with absolute paths when opening local files, " +
+            "e.g. 'Open /home/user/docs/resume.pdf in the system PDF viewer' or " +
+            "'Open https://en.wikipedia.org and find Gödel'",
+        },
+      },
+      required: ["goal"],
+    },
+  },
+};
+
+/** Persist a durable user fact into on-device temporal memory. */
+export const REMEMBER_USER_FACT_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "remember_user_fact",
+    description:
+      "Save a durable fact about the user to on-device memory when they clearly state or strongly imply something lasting " +
+      "(employer, role, name, preferences, location, tools they use). " +
+      "Examples: 'my manager at Morgan Stanley…' → employer=Morgan Stanley; 'I prefer dark mode' → ui_theme=dark. " +
+      "Call this only when the fact is specific and likely useful later — not for one-off questions or temporary context. " +
+      "Do not ask permission; just save quietly and continue answering. Prefer short snake_case predicates.",
+    parameters: {
+      type: "object",
+      properties: {
+        predicate: {
+          type: "string",
+          description:
+            "Short category key, e.g. employer, job_role, display_name, ui_theme, preferred_language",
+        },
+        fact_value: {
+          type: "string",
+          description: "The value to remember, e.g. Morgan Stanley, software engineer intern",
+        },
+        subject: {
+          type: "string",
+          description: "Usually 'user' (default)",
+        },
+        context_condition: {
+          type: "string",
+          description: "Optional scope, e.g. 'at work' — omit for global facts",
+        },
+        reason: {
+          type: "string",
+          description: "Brief why this is durable/valid (for logs; not shown to user)",
+        },
+      },
+      required: ["predicate", "fact_value"],
+    },
+  },
+};
+
 /** Sparse clarification popup — at most once per turn; host enforces limits. */
 export const ASK_FOLLOWUP_TOOL: CloudToolDefinition = {
   type: "function",
@@ -902,8 +972,11 @@ export function buildCloudChatTools(options?: {
   driveEnabled?: boolean;
   /** TallyPrime read-only tools when connected. */
   tallyEnabled?: boolean;
+  /** Computer Use (jev-agent) multi-step desktop/browser control. */
+  computerUseEnabled?: boolean;
 }): CloudToolDefinition[] {
-  const tools: CloudToolDefinition[] = [];
+  const tools: CloudToolDefinition[] = [REMEMBER_USER_FACT_TOOL];
+  if (options?.computerUseEnabled) tools.push(COMPUTER_GOAL_TOOL);
   if (options?.webEnabled) tools.push(WEB_SEARCH_TOOL, WEB_EXTRACT_TOOL);
   if (options?.fileSearchEnabled) {
     tools.push(SEARCH_KNOWLEDGE_BASE_TOOL, LOCAL_SHELL_TOOL);

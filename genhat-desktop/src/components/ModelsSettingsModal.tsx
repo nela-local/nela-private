@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { X, Download, Loader2, Trash2, Sparkles, Save, CheckCircle, SlidersHorizontal, Cpu, Scissors, LifeBuoy } from "lucide-react";
+import { X, Download, Loader2, Trash2, Sparkles, Save, CheckCircle, SlidersHorizontal, Cpu, Scissors, LifeBuoy, Brain, ArrowLeft } from "lucide-react";
 import type { RegisteredModel, RagModelPreferences } from "../types";
 import { KITTEN_TTS_VOICES } from "../types";
 import { Api, type CompatibilityRating } from "../api";
@@ -24,6 +24,7 @@ import {
   type LocalIntelligenceTier,
 } from "../app/intelligenceModes";
 import ConnectionsSettings from "./ConnectionsSettings";
+import MemorySettings from "./MemorySettings";
 import { useAppUpdateStore } from "../stores/appUpdateStore";
 import "./ModelsSettingsModal.css";
 
@@ -352,6 +353,7 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
   const clearUpToDate = useAppUpdateStore((s) => s.clearUpToDate);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [supportBundleBusy, setSupportBundleBusy] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<"main" | "memory">("main");
   const activeWorkspace = useWorkspaceStore((s) => s.activeWorkspace);
   const preferredMode = useCloudStore((s) => s.preferredMode);
   const sessions = useSessionStore((s) => s.sessions);
@@ -385,6 +387,7 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setIntelligenceMapping(readIntelligenceMapping());
+      setSettingsPage("main");
       clearUpToDate();
       void import("@tauri-apps/api/app")
         .then(({ getVersion }) => getVersion())
@@ -687,8 +690,26 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
       >
         <div className="settings-modal-header">
           <div className="settings-title">
-            <Sparkles size={18} />
-            <span>Settings</span>
+            {settingsPage === "memory" ? (
+              <>
+                <button
+                  type="button"
+                  className="settings-close"
+                  onClick={() => setSettingsPage("main")}
+                  aria-label="Back to settings"
+                  style={{ position: "static", marginRight: 4 }}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <Brain size={18} />
+                <span>Memory</span>
+              </>
+            ) : (
+              <>
+                <Sparkles size={18} />
+                <span>Settings</span>
+              </>
+            )}
           </div>
           <button className="settings-close" onClick={onClose} aria-label="Close settings">
             <X size={16} />
@@ -696,6 +717,12 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
         </div>
 
         <div className="settings-modal-body">
+          {settingsPage === "memory" ? (
+            <div className="px-4 py-3">
+              <MemorySettings />
+            </div>
+          ) : (
+          <>
           <div className="px-4 py-3 border-b border-glass-border space-y-3">
             <div className="flex items-center justify-between gap-3 py-1">
               <div>
@@ -767,6 +794,22 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
             </div>
             <div className="py-1 border-t border-glass-border pt-3">
               <ConnectionsSettings />
+            </div>
+            <div className="flex items-center justify-between gap-3 py-1 border-t border-glass-border pt-3">
+              <div>
+                <div className="text-[0.85rem] font-semibold text-txt">Memory</div>
+                <div className="text-[0.78rem] text-txt-muted">
+                  View and edit what NELA remembers about you on this device.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 py-1.5 px-3 text-[0.78rem] font-medium rounded-lg border border-glass-border bg-glass-bg text-txt-secondary hover:border-neon hover:text-neon"
+                onClick={() => setSettingsPage("memory")}
+              >
+                <Brain size={14} />
+                Memory
+              </button>
             </div>
             <div className="flex items-center justify-between gap-3 py-1">
               <div>
@@ -1413,6 +1456,8 @@ const ModelsSettingsModal: React.FC<ModelsSettingsModalProps> = ({
             </aside>
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
       <InstallModelModal

@@ -481,17 +481,46 @@ pub async fn create_checkout(
     app_data_dir: &Path,
     plan: &str,
 ) -> Result<CheckoutResponse, String> {
-    let plan = plan.to_string();
+    create_checkout_request(
+        app_data_dir,
+        CheckoutRequest {
+            r#type: Some("subscription".to_string()),
+            plan: Some(plan.to_string()),
+            addon_id: None,
+            interval: None,
+        },
+    )
+    .await
+}
+
+pub async fn create_addon_checkout(
+    app_data_dir: &Path,
+    addon_id: &str,
+    interval: &str,
+) -> Result<CheckoutResponse, String> {
+    create_checkout_request(
+        app_data_dir,
+        CheckoutRequest {
+            r#type: Some("addon".to_string()),
+            plan: None,
+            addon_id: Some(addon_id.to_string()),
+            interval: Some(interval.to_string()),
+        },
+    )
+    .await
+}
+
+async fn create_checkout_request(
+    app_data_dir: &Path,
+    body: CheckoutRequest,
+) -> Result<CheckoutResponse, String> {
     let resp = authorized_request(app_data_dir, |token| {
-        let plan = plan.clone();
+        let body = body.clone();
         async move {
             send_cloud(
                 reqwest::Method::POST,
                 "/v1/billing/razorpay/checkout",
-                move |req| {
-                    req.bearer_auth(token.clone())
-                        .json(&CheckoutRequest { plan: plan.clone() })
-                },
+                move |req| req.bearer_auth(token.clone()).json(&body),
             )
             .await
         }

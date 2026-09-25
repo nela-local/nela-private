@@ -1,19 +1,16 @@
-/** Detect a user turn that wants to send or read email (for the in-chat Connect card). */
+/**
+ * Former regex heuristics for “looks like email” were removed — they false-positive
+ * on any mention of the word “email” (e.g. signup / temp-mail prompts) and forced
+ * the Gmail connect card + gmail_* tools.
+ *
+ * Gmail tools are still available when the user has Gmail connected and the model
+ * chooses gmail_send / gmail_read; we no longer auto-detect intent from text.
+ */
 
-const EMAIL_SEND_REQUEST =
-  /(?:\b(?:e-?mail|gmail)\b|\bsend\b[\s\S]{0,48}\b(?:e-?mail|mail|message)\b|\bwrite\b[\s\S]{0,24}\b(?:e-?mail|mail)\b|\bmail\s+(?:to|this)\b)/i;
-
-const EMAIL_READ_REQUEST =
-  /(?:\b(?:latest|recent|last|unread)\b[\s\S]{0,40}\b(?:e-?mail|mail|inbox|message)s?\b|\b(?:summarize|read|check|fetch|show|open)\b[\s\S]{0,40}\b(?:e-?mail|mail|inbox|message)s?\b|\binbox\b)/i;
-
-export function looksLikeEmailRequest(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return EMAIL_SEND_REQUEST.test(trimmed) || EMAIL_READ_REQUEST.test(trimmed);
+export function looksLikeEmailRequest(_text: string): boolean {
+  return false;
 }
 
-export function looksLikeEmailReadRequest(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return EMAIL_READ_REQUEST.test(trimmed);
+export function looksLikeEmailReadRequest(_text: string): boolean {
+  return false;
 }

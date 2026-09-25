@@ -42,6 +42,7 @@ import { useCloudStore } from "../../stores/cloudStore";
 import { streamChatByMode, willRouteToCloud } from "./cloudOrLocalStream";
 import type { SendHandlerContext } from "./types";
 import { runCloudAwareToolLoop } from "./cloudNativeToolLoop";
+import { useComputerUseStore } from "../../stores/computerUseStore";
 import { looksLikeEmailRequest } from "./gmailConnectIntent";
 import { looksLikeTelegramRequest } from "./telegramConnectIntent";
 import { useGmailStore } from "../../stores/gmailStore";
@@ -129,17 +130,20 @@ export async function handleSendTextChat(
   }
 
   if (looksLikeTallyRequest(text)) {
-    void useTallyStore
-      .getState()
-      .refresh()
-      .then(() => {
-        if (!useTallyStore.getState().connected) {
+    void import("../tallyAccess").then(({ requireTallyConnectorAccess }) => {
+      if (!requireTallyConnectorAccess()) return;
+      void useTallyStore
+        .getState()
+        .refresh()
+        .then(() => {
+          if (!useTallyStore.getState().connected) {
+            useTallyStore.getState().openWizard();
+          }
+        })
+        .catch(() => {
           useTallyStore.getState().openWizard();
-        }
-      })
-      .catch(() => {
-        useTallyStore.getState().openWizard();
-      });
+        });
+    });
   }
 
   ctx.setGeneralGenerating(true);
@@ -189,6 +193,33 @@ export async function handleSendTextChat(
       : []),
     ...toContextMessages(fullSessionMessages),
   ];
+
+  // Inject bi-temporal memory preferences + episodic snippets (best-effort).
+  try {
+    const mem = await Api.memoryAssembleContext(sid, text);
+    const blocks: string[] = [];
+    if (mem.preferencesMarkdown?.trim()) blocks.push(mem.preferencesMarkdown.trim());
+    if (mem.episodicSnippets?.length) {
+      blocks.push(
+        `<episodic_memory>\n${mem.episodicSnippets.map((s) => `- ${s}`).join("\n")}\n</episodic_memory>`
+      );
+    }
+    if (blocks.length > 0) {
+      apiMessages.splice(1, 0, {
+        role: "system" as const,
+        content: blocks.join("\n\n"),
+      });
+    }
+  } catch (err) {
+    console.warn("Temporal memory assemble failed:", err);
+  }
+
+  // Persist user turn into episodic memory (extraction runs server-side).
+  void Api.memoryRecordEpisode({
+    sessionId: sid,
+    role: "user",
+    content: text,
+  }).catch((err) => console.warn("memory_record_episode(user) failed:", err));
 
   const generationOptions = ctx.getChatGenerationOptions(ctx.selectedModel);
   // Cloud turns must not wait on local llama (compaction summarize / warm-up).
@@ -401,6 +432,14 @@ export async function handleSendTextChat(
     ctx.setGeneralElapsedTime(totalTime);
     ctx.setGeneralGenerationTime(totalTime);
     ctx.setStreamingThinking("");
+
+    if (response?.trim()) {
+      void Api.memoryRecordEpisode({
+        sessionId: sid,
+        role: "assistant",
+        content: response.slice(0, 8000),
+      }).catch((err) => console.warn("memory_record_episode(assistant) failed:", err));
+    }
 
     let artifactPath: string | null = null;
     let artifactStage: string | null = null;
@@ -777,6 +816,7 @@ export async function handleSendTextChat(
       webDepth: "full",
       webEnabled: effectiveWebEnabled,
       fileSearchEnabled,
+      computerUseEnabled: useComputerUseStore.getState().enabled,
       includeMcpTools:
         !privateMode &&
         (!autoArtifacts || Boolean(tallyIntent && connectorToolsNeeded)),

@@ -121,13 +121,18 @@ export function resolveSlashToken(token: string): SlashCommandDef | undefined {
 
 /** Parse leading slash commands from a message. */
 export function parseSlashCommands(text: string): ParsedSlashCommands {
-  let remaining = text.trimStart();
+  // Preserve the user's newlines/spaces in the prompt body. Only consume
+  // leading whitespace when matching /commands at the start.
+  let remaining = text;
   const commands: string[] = [];
   const flags = { web: false, rag: false, files: false };
   let artifact: SlashArtifactRoute | undefined;
 
-  while (remaining.startsWith("/")) {
-    const match = remaining.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*/);
+  while (true) {
+    const stripped = remaining.replace(/^\s+/, "");
+    if (!stripped.startsWith("/")) break;
+
+    const match = stripped.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*/);
     if (!match) break;
 
     const token = match[1].toLowerCase();
@@ -135,7 +140,8 @@ export function parseSlashCommands(text: string): ParsedSlashCommands {
     if (!def) break;
 
     commands.push(`/${token}`);
-    remaining = remaining.slice(match[0].length);
+    const leadWs = remaining.length - stripped.length;
+    remaining = remaining.slice(leadWs + match[0].length);
 
     if (def.web) flags.web = true;
     if (def.rag) flags.rag = true;
@@ -143,7 +149,7 @@ export function parseSlashCommands(text: string): ParsedSlashCommands {
     if (def.artifact) artifact = def.artifact;
   }
 
-  const cleanPrompt = remaining.trim();
+  const cleanPrompt = remaining;
 
   return {
     raw: text,
@@ -156,7 +162,7 @@ export function parseSlashCommands(text: string): ParsedSlashCommands {
 
 /** Prompt text to send after slash parsing (with artifact fallbacks). */
 export function slashPromptForSend(parsed: ParsedSlashCommands): string {
-  if (parsed.cleanPrompt) return parsed.cleanPrompt;
+  if (parsed.cleanPrompt.trim()) return parsed.cleanPrompt;
   if (parsed.artifact) return ARTIFACT_FALLBACK_PROMPTS[parsed.artifact.kind];
   return parsed.raw.trim();
 }

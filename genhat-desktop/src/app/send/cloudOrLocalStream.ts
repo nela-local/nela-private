@@ -316,7 +316,9 @@ async function runCloudStream(args: StreamArgs): Promise<void> {
     tools: args.tools,
     tool_choice: args.tool_choice,
     response_format: args.response_format,
-    includeReasoning: args.disableThinking !== true,
+    // Fast (and Auto) never request reasoning — tools still work.
+    includeReasoning:
+      args.disableThinking !== true && mode !== "fast" && mode !== "auto",
     plugins: args.plugins,
     client: {
       platform: "desktop",

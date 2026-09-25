@@ -19,7 +19,10 @@ export const COPY = {
   toolSearchFilesHint:
     "Search folders indexed by NELA’s File Indexer (smart keyword + meaning search on your machine).",
   toolShowReasoning: "Show reasoning", // advanced-only; see Task 12
-  toolShowReasoningHint: "Show the assistant's step-by-step thinking.",
+  toolShowReasoningHint:
+    "Show the assistant's step-by-step thinking (Cloud Smart and Deep only).",
+  toolShowReasoningFastHint:
+    "Step-by-step reasoning is available in Cloud Smart and Deep, not Fast.",
 
   // Attach menu (was: Add Files / Ingest / direct)
   addDocumentsTitle: "Attach files",
@@ -107,7 +110,7 @@ export const COPY = {
 
   // Intelligence tiers (model mode)
   intelligenceFast: "Fast",
-  intelligenceFastHint: "Quick answers with the smallest model.",
+  intelligenceFastHint: "Quick answers — tools on, no step-by-step reasoning.",
   intelligenceSmart: "Smart",
   intelligenceSmartHint: "Balanced reasoning for everyday questions.",
   intelligenceDeep: "Deep",

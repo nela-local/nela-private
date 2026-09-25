@@ -42,11 +42,15 @@ import { useDownloadStore } from "../stores/downloadStore";
 import { useCloudStore } from "../stores/cloudStore";
 import { useDocGraphStore } from "../stores/docGraphStore";
 import { useShallow } from "zustand/react/shallow";
+import {
+  intelligenceModeAllowsCloudReasoning,
+  shouldStreamCloudReasoning,
+} from "../app/send/cloudReasoning";
 import ChatTabBar from "./ChatTabBar";
 import AppMainTopBar from "./AppMainTopBar";
 import AppMainModeControls from "./AppMainModeControls";
 import AppMainContentArea from "./AppMainContentArea";
-
+import { COPY } from "../app/copy";
 interface AppMainContentProps {
   networkActive?: boolean;
 }
@@ -148,7 +152,14 @@ export default function AppMainContent({ networkActive: networkActiveProp }: App
 
   // ── Derived state ─────────────────────────────────────────────────────────
   const effectiveRagEnabled = advanced ? ragEnabled : true;
-  const effectiveThinkingEnabled = thinkingEnabled;
+  // Cloud Fast / Auto: no reasoning tokens (tools still work). Smart + Deep only.
+  const cloudReasoningAllowed =
+    preferredMode === "local" ||
+    intelligenceModeAllowsCloudReasoning(intelligenceMode);
+  const effectiveThinkingEnabled =
+    preferredMode === "local"
+      ? thinkingEnabled
+      : shouldStreamCloudReasoning(thinkingEnabled);
 
   const activeMindmapGraph = activeMindmapOverlay
     ? (mindmapsBySession[activeMindmapOverlay.sessionId] ?? []).find(
@@ -291,7 +302,16 @@ export default function AppMainContent({ networkActive: networkActiveProp }: App
         onSaveAudioToSidebar={handleSaveAudioToSidebar}
         streamingThinking={streamingThinking}
         thinkingEnabled={effectiveThinkingEnabled}
-        onToggleThinking={() => setThinkingEnabled(!thinkingEnabled)}
+        onToggleThinking={
+          cloudReasoningAllowed
+            ? () => setThinkingEnabled(!thinkingEnabled)
+            : undefined
+        }
+        thinkingToggleHint={
+          cloudReasoningAllowed
+            ? undefined
+            : COPY.toolShowReasoningFastHint
+        }
         activeMindmapOverlay={activeMindmapOverlay}
         activeMindmapGraph={activeMindmapGraph}
         onCloseMindmapOverlay={() => setActiveMindmapOverlay(null)}

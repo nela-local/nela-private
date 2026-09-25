@@ -1326,6 +1326,7 @@ mod tests {
     #[test]
     fn renders_complete_document() {
         let plan = HtmlPlan {
+            workspace_id: None,
             title: "Test Bakery".into(),
             tagline: Some("Fresh daily".into()),
             archetype: "local_business".into(),
@@ -1348,6 +1349,7 @@ mod tests {
     #[test]
     fn renders_archetype_layout_classes() {
         let article = HtmlPlan {
+            workspace_id: None,
             title: "Climate Essay".into(),
             tagline: None,
             archetype: "article".into(),
@@ -1362,6 +1364,7 @@ mod tests {
         assert!(render_html_plan(article).contains("layout-article"));
 
         let resume = HtmlPlan {
+            workspace_id: None,
             title: "Jane Doe".into(),
             tagline: Some("Engineer".into()),
             archetype: "resume".into(),
@@ -1376,6 +1379,7 @@ mod tests {
         assert!(render_html_plan(resume).contains("layout-resume"));
 
         let picker = HtmlPlan {
+            workspace_id: None,
             title: "Random Movie Picker".into(),
             tagline: None,
             archetype: "interactive".into(),
@@ -1396,6 +1400,7 @@ mod tests {
     #[test]
     fn renders_dashboard_charts() {
         let plan = HtmlPlan {
+            workspace_id: None,
             title: "Sales Dashboard".into(),
             tagline: Some("Q4 overview".into()),
             archetype: "dashboard".into(),

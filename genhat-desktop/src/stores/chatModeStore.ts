@@ -149,19 +149,16 @@ export const useChatModeStore = create<ChatModeState & ChatModeActions>((set) =>
       if (!trimmed) return state;
       const last = state.liveToolSteps[state.liveToolSteps.length - 1];
       if (last?.active && last.label === trimmed) return state;
-      const completed = state.liveToolSteps.map((s) =>
-        s.active ? { ...s, active: false } : s
-      );
+      // Keep only the current step in the UI (no growing history list).
       return {
         liveToolStatus: trimmed,
         liveToolSteps: [
-          ...completed,
           {
-            id: `step-${Date.now()}-${completed.length}`,
+            id: `step-${Date.now()}`,
             label: trimmed,
             active: true,
           },
-        ].slice(-12),
+        ],
       };
     }),
 

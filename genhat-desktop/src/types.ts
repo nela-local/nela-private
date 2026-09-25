@@ -890,12 +890,26 @@ export interface EntitlementResponse {
     maxOutputTokens: number;
     requestsPerMinute: number;
   };
+  addons?: {
+    tallyConnector?: {
+      active: boolean;
+      interval?: "month" | "year" | null;
+      currentPeriodEnd?: string | null;
+    };
+  };
 }
 
 export interface CheckoutResponse {
-  checkoutUrl: string;
+  mode?: "standard" | "redirect";
+  checkoutUrl?: string;
+  keyId?: string;
+  orderId?: string;
+  amount?: number;
+  currency?: string;
+  name?: string;
+  description?: string;
+  prefillEmail?: string;
 }
-
 export interface CloudToolCall {
   id: string;
   type: "function";

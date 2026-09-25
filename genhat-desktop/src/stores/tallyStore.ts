@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Api } from "../api";
 import { friendlyErrorFromUnknown } from "../app/friendlyError";
+import { requireTallyConnectorAccess } from "../app/tallyAccess";
 
 type TallyStatus = {
   connected: boolean;
@@ -49,7 +50,10 @@ export const useTallyStore = create<TallyStore>((set, get) => ({
   error: null,
   wizardOpen: false,
 
-  openWizard: () => set({ wizardOpen: true, error: null }),
+  openWizard: () => {
+    if (!requireTallyConnectorAccess()) return;
+    set({ wizardOpen: true, error: null });
+  },
   closeWizard: () => set({ wizardOpen: false }),
 
   scanPorts: async (host) => {
@@ -96,6 +100,10 @@ export const useTallyStore = create<TallyStore>((set, get) => ({
   },
 
   connect: async (input) => {
+    if (!requireTallyConnectorAccess()) {
+      set({ loading: false });
+      return false;
+    }
     set({ loading: true, error: null });
     try {
       const status = (await Api.tallyConnect({

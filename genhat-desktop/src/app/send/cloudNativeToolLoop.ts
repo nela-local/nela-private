@@ -152,6 +152,8 @@ export interface CloudNativeToolLoopOptions {
   webEnabled?: boolean;
   /** Expose local Doc Graph `file_search` tool (Search my files / /files). */
   fileSearchEnabled?: boolean;
+  /** Expose computer_goal (jev-agent Computer Use). */
+  computerUseEnabled?: boolean;
   plugins?: CloudFileParserPlugin[];
   /** Include MCP spreadsheet/presentation/html tools alongside web_search. */
   includeMcpTools?: boolean;
@@ -292,6 +294,60 @@ function streamCloudRound(
       onError: (err) => settle(() => reject(err)),
     });
   });
+}
+
+/** Pull absolute local paths from recent tool/search context for computer_goal. */
+function collectLocalPathsForComputerGoal(
+  opts: CloudNativeToolLoopOptions,
+  webSearchResult: WebSearchResult | null
+): string[] {
+  const pathRe =
+    /(?:\/(?:home|Users|tmp|var|opt|mnt|media)[^\s"'`\]>,]+|~\/[^\s"'`\]>,]+|[A-Za-z]:\\[^\s"'`\]>,]+)/g;
+  const found = new Set<string>();
+
+  const add = (raw: string) => {
+    const cleaned = raw.trim().replace(/[.,);]+$/, "");
+    if (!cleaned) return;
+    if (
+      cleaned.startsWith("/") ||
+      cleaned.startsWith("~/") ||
+      /^[A-Za-z]:[\\/]/.test(cleaned)
+    ) {
+      found.add(cleaned);
+    }
+  };
+
+  for (const hit of webSearchResult?.results ?? []) {
+    if (isLocalFileHitUrl(hit.url)) {
+      add(fileUrlToPath(hit.url));
+    }
+  }
+
+  for (const msg of opts.messages.slice(-12)) {
+    if (msg.role !== "tool" && msg.role !== "assistant") continue;
+    const text = typeof msg.content === "string" ? msg.content : "";
+    for (const m of text.matchAll(pathRe)) {
+      add(m[0]);
+    }
+  }
+
+  return [...found];
+}
+
+function enrichComputerGoalWithPaths(goal: string, paths: string[]): string {
+  if (!paths.length) return goal;
+  const lower = goal.toLowerCase();
+  const matching = paths.filter((p) => {
+    const base = p.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+    return Boolean(base && lower.includes(base));
+  });
+  const chosen = matching.length ? matching : paths;
+  const missing = chosen.filter((p) => !goal.includes(p));
+  if (!missing.length) return goal;
+  return (
+    `${goal}\n\nAbsolute path(s) from local file search (use desktop_open_path): ` +
+    missing.join(", ")
+  );
 }
 
 async function executeToolCall(
@@ -695,6 +751,122 @@ async function executeToolCall(
     };
   }
 
+  if (name === "computer_goal") {
+    const rawGoal =
+      typeof args.goal === "string"
+        ? args.goal.trim()
+        : typeof args.query === "string"
+          ? args.query.trim()
+          : "";
+    if (!rawGoal) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: "computer_goal requires a goal string",
+        }),
+        webSearchResult,
+      };
+    }
+    const goal = enrichComputerGoalWithPaths(
+      rawGoal,
+      collectLocalPathsForComputerGoal(opts, webSearchResult)
+    );
+    try {
+      const { openComputerUseStartConfirm } = await import(
+        "../../stores/computerUseStore"
+      );
+      const gate = await openComputerUseStartConfirm(goal);
+      if (!gate.confirmed) {
+        return {
+          content: JSON.stringify({
+            ok: false,
+            reason: "user_cancelled",
+            error: "User denied Computer Use for this goal",
+          }),
+          webSearchResult,
+        };
+      }
+      opts.onToolStatus?.("Computer Use running…");
+      const result = await Api.computerUseRun({ goal });
+      return {
+        content: JSON.stringify({
+          ok: result.status === "ok" || result.status === "cancelled",
+          status: result.status,
+          summary: result.summary,
+          runId: result.runId,
+          nelaCalls: result.nelaCalls,
+        }),
+        webSearchResult,
+      };
+    } catch (e) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+        webSearchResult,
+      };
+    }
+  }
+
+  if (name === "remember_user_fact") {
+    const predicate =
+      typeof args.predicate === "string" ? args.predicate.trim() : "";
+    const factValue =
+      typeof args.fact_value === "string"
+        ? args.fact_value.trim()
+        : typeof args.factValue === "string"
+          ? args.factValue.trim()
+          : "";
+    if (!predicate || !factValue) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: "remember_user_fact requires predicate and fact_value",
+        }),
+        webSearchResult,
+      };
+    }
+    const subject =
+      typeof args.subject === "string" && args.subject.trim()
+        ? args.subject.trim()
+        : "user";
+    const contextCondition =
+      typeof args.context_condition === "string" && args.context_condition.trim()
+        ? args.context_condition.trim()
+        : typeof args.contextCondition === "string" && args.contextCondition.trim()
+          ? args.contextCondition.trim()
+          : null;
+    try {
+      opts.onToolStatus?.("Saving to memory…");
+      const fact = await Api.memoryRememberFact({
+        predicate,
+        factValue,
+        subject,
+        contextCondition,
+        explicit: true,
+      });
+      return {
+        content: JSON.stringify({
+          ok: true,
+          id: fact.id,
+          predicate: fact.predicate,
+          factValue: fact.factValue,
+          saved: true,
+        }),
+        webSearchResult,
+      };
+    } catch (e) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+        webSearchResult,
+      };
+    }
+  }
+
   if (name === "ask_followup") {
     const result = await executeAskFollowUp(
       {
@@ -978,6 +1150,10 @@ function summarizeToolRound(toolCalls: CloudToolCall[]): string | null {
   if (!toolCalls.length) return null;
   const labels = toolCalls.map((c) => {
     switch (c.function.name) {
+      case "computer_goal":
+        return "Computer Use";
+      case "remember_user_fact":
+        return "Saving to memory";
       case "web_search":
         return "Searching the web";
       case "search_knowledge_base":
@@ -1213,7 +1389,10 @@ export async function runCloudNativeToolLoop(
   }
   let tallyEnabled = false;
   try {
-    tallyEnabled = Boolean((await Api.tallyStatus()).connected);
+    const { hasTallyConnectorAccess } = await import("../tallyAccess");
+    tallyEnabled =
+      hasTallyConnectorAccess() &&
+      Boolean((await Api.tallyStatus()).connected);
   } catch {
     tallyEnabled = false;
   }
@@ -1227,6 +1406,7 @@ export async function runCloudNativeToolLoop(
     telegramEnabled,
     driveEnabled,
     tallyEnabled,
+    computerUseEnabled: Boolean(loopOpts.computerUseEnabled),
   }).filter(
     (t) => !(privateMode && ARTIFACT_CREATING_TOOLS.has(t.function.name))
   );
@@ -1252,6 +1432,8 @@ export async function runCloudNativeToolLoop(
       t.function.name === "drive_get"
   );
   const hasTally = tools.some((t) => t.function.name.startsWith("tally_"));
+  const hasRemember = tools.some((t) => t.function.name === "remember_user_fact");
+  const hasComputerUse = tools.some((t) => t.function.name === "computer_goal");
   if (
     hasWebSearch ||
     hasFileSearch ||
@@ -1260,9 +1442,30 @@ export async function runCloudNativeToolLoop(
     hasGmail ||
     hasTelegram ||
     hasDrive ||
-    hasTally
+    hasTally ||
+    hasRemember ||
+    hasComputerUse
   ) {
     const parts: string[] = [];
+    if (hasComputerUse) {
+      parts.push(
+        "You have computer_goal to operate the user's real computer via Computer Use. " +
+          "Websites run in the user's Chrome (Browser Harness). " +
+          "Call it with a short concrete goal when they ask you to open sites, click, type, control apps, " +
+          "or open a local file in a system app (e.g. PDF viewer). " +
+          "For local files: first search_knowledge_base if needed, then call computer_goal with the absolute path " +
+          "in the goal string (e.g. 'Open /home/…/amogh_latest_resume.pdf in the system PDF viewer'). " +
+          "The user must approve before it runs. Do not invent results — wait for the tool response summary."
+      );
+    }
+    if (hasRemember) {
+      parts.push(
+        "You have remember_user_fact to write durable facts about the user to on-device memory. " +
+          "When the user clearly states or strongly implies lasting personal context (employer, role, name, preferences), " +
+          "call it once with a short predicate and value — e.g. employer=Morgan Stanley from 'my manager at Morgan Stanley…'. " +
+          "Do not announce the save unless asked; continue answering the user's question. Skip ephemeral or speculative details."
+      );
+    }
     if (hasWebSearch) {
       parts.push(
         "You have a web_search tool. Call it ONLY when you need live web facts — never automatically. " +

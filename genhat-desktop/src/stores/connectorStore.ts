@@ -183,6 +183,13 @@ export const useConnectorStore = create<ConnectorStore>((set, get) => ({
       }
 
       if (flow === "tally_localhost") {
+        const { requireTallyConnectorAccess } = await import(
+          "../app/tallyAccess"
+        );
+        if (!requireTallyConnectorAccess()) {
+          set({ busy: false, connectingProviderId: null });
+          return null;
+        }
         useTallyStore.getState().openWizard();
         set({ busy: false, connectingProviderId: null });
         return null;

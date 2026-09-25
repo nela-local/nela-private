@@ -161,15 +161,43 @@ pub async fn cloud_get_entitlement(app: AppHandle) -> Result<EntitlementResponse
 #[tauri::command]
 pub async fn cloud_create_checkout(
     app: AppHandle,
-    plan: String,
+    plan: Option<String>,
+    addon_id: Option<String>,
+    interval: Option<String>,
 ) -> Result<CheckoutResponse, String> {
     let dir = app_data_dir(&app)?;
-    let plan = plan.trim().to_lowercase();
-    if plan != "starter" && plan != "pro" {
-        return Err("That plan isn't available. Please choose Starter or Pro.".to_string());
-    }
-    let response = client::create_checkout(&dir, &plan).await?;
-    open_url(&app, &response.checkout_url)?;
+    let addon = addon_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let interval = interval.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let plan = plan.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let response = if let (Some(addon_id), Some(interval)) = (addon, interval) {
+        if addon_id != "tally_connector" {
+            return Err("That add-on isn't available.".to_string());
+        }
+        if interval != "month" && interval != "year" {
+            return Err("Choose monthly or yearly billing.".to_string());
+        }
+        client::create_addon_checkout(&dir, addon_id, interval).await?
+    } else if let Some(plan) = plan {
+        let plan = plan.to_lowercase();
+        if plan != "starter" && plan != "pro" {
+            return Err("That plan isn't available. Please choose Starter or Pro.".to_string());
+        }
+        client::create_checkout(&dir, &plan).await?
+    } else {
+        return Err("Choose a plan or add-on to checkout.".to_string());
+    };
+
+    let url = response
+        .checkout_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            "Checkout opened without a payment link. Please try again or open Billing on the website."
+                .to_string()
+        })?;
+    open_url(&app, url)?;
     Ok(response)
 }
 

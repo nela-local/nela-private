@@ -48,6 +48,48 @@ import {
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import { useSessionStore } from "./stores/sessionStore";
 
+// ── Temporal memory types (used by Api methods below) ────────────────────────
+
+export type MemoryFact = {
+  id: string;
+  subject: string;
+  predicate: string;
+  factValue: string;
+  contextCondition?: string | null;
+  sourceType: "explicit_statement" | "inferred_pattern";
+  status: "provisional" | "active" | "superseded";
+  confidence: number;
+  observationCount: number;
+  deviceCounts: Record<string, number>;
+  lastObservedAt: string;
+  validFrom: string;
+  validTo?: string | null;
+  originDeviceId: string;
+  hlcTimestamp: string;
+  sourceEpisodeId?: string | null;
+  invalidatedByFactId?: string | null;
+  supersededByFactId?: string | null;
+  createdAt: string;
+  cEff?: number | null;
+};
+
+export type MemoryAssembleContextResult = {
+  preferencesMarkdown: string;
+  episodicSnippets: string[];
+};
+
+export type MemoryExportBundle = {
+  manifest: {
+    modelId: string;
+    dimensions: number;
+    schemaVersion: number;
+    deviceId: string;
+    exportedHlc: string;
+    reindexPredicatesRequired?: boolean;
+  };
+  facts: MemoryFact[];
+};
+
 /** Pin chat completions to a per-session/workspace llama-server KV slot. */
 function resolveRequestIdSlot(opts?: {
   idSlot?: number | null;
@@ -1810,6 +1852,141 @@ export const Api = {
       maxRows: input?.maxRows ?? null,
     });
   },
+
+  // ── Temporal memory ──────────────────────────────────────────────────────
+  async memoryRecordEpisode(request: {
+    sessionId: string;
+    role: string;
+    content: string;
+  }): Promise<string> {
+    return invoke("memory_record_episode", { request });
+  },
+
+  async memoryAssembleContext(
+    sessionId: string,
+    query: string
+  ): Promise<MemoryAssembleContextResult> {
+    return invoke("memory_assemble_context", { sessionId, query });
+  },
+
+  async memoryIngestSignal(request: {
+    signalType: string;
+    subject: string;
+    candidatePredicate: string;
+    candidateValue: string;
+    contextCondition?: string | null;
+  }): Promise<void> {
+    return invoke("memory_ingest_signal", { request });
+  },
+
+  async memoryRememberFact(request: {
+    predicate: string;
+    factValue: string;
+    subject?: string;
+    contextCondition?: string | null;
+    explicit?: boolean;
+  }): Promise<MemoryFact> {
+    return invoke("memory_remember_fact", { request });
+  },
+
+  async memoryListFacts(filter: {
+    status?: string | null;
+    sourceType?: string | null;
+    query?: string | null;
+    includeHistory?: boolean;
+  } = {}): Promise<MemoryFact[]> {
+    return invoke("memory_list_facts", { filter });
+  },
+
+  async memoryGetFact(id: string): Promise<MemoryFact | null> {
+    return invoke("memory_get_fact", { id });
+  },
+
+  async memoryUpdateFact(request: {
+    id: string;
+    factValue: string;
+  }): Promise<MemoryFact> {
+    return invoke("memory_update_fact", { request });
+  },
+
+  async memoryForgetFact(id: string): Promise<void> {
+    return invoke("memory_forget_fact", { id });
+  },
+
+  async memoryDeleteFact(id: string): Promise<void> {
+    return invoke("memory_delete_fact", { id });
+  },
+
+  async memoryClear(request: { includeEpisodes?: boolean } = {}): Promise<void> {
+    return invoke("memory_clear", { request });
+  },
+
+  async memoryExportBundle(opts?: {
+    modelId?: string;
+    dimensions?: number;
+  }): Promise<MemoryExportBundle> {
+    return invoke("memory_export_bundle", {
+      modelId: opts?.modelId ?? null,
+      dimensions: opts?.dimensions ?? null,
+    });
+  },
+
+  async memoryImportBundle(
+    bundle: MemoryExportBundle,
+    opts?: { modelId?: string; dimensions?: number }
+  ): Promise<{
+    mergedFacts: number;
+    reindexPredicatesRequired: boolean;
+    reindexed: number;
+  }> {
+    return invoke("memory_import_bundle", {
+      bundle,
+      modelId: opts?.modelId ?? null,
+      dimensions: opts?.dimensions ?? null,
+    });
+  },
+
+  async memoryRunMaintenance(): Promise<{
+    episodesPruned: number;
+    signalsProcessed: number;
+  }> {
+    return invoke("memory_run_maintenance");
+  },
+
+  // ── Computer Use (jev-agent) ───────────────────────────────────────────────
+  async computerUseRun(request: {
+    goal: string;
+    runId?: string;
+  }): Promise<{
+    runId: string;
+    status: string;
+    summary: string;
+    nelaCalls: number;
+  }> {
+    return invoke("computer_use_run", { request });
+  },
+
+  async computerUseRespond(request: {
+    runId: string;
+    answer: string;
+    kind?: string;
+  }): Promise<void> {
+    return invoke("computer_use_respond", { request });
+  },
+
+  async computerUseCancel(runId?: string | null): Promise<void> {
+    return invoke("computer_use_cancel", { runId: runId ?? null });
+  },
+
+  async computerUseStatus(): Promise<{
+    running: boolean;
+    sidecarAlive: boolean;
+    ready: boolean;
+    lastEvent: unknown;
+    recent: unknown[];
+  }> {
+    return invoke("computer_use_status");
+  },
 };
 
 // ── Playground / Pipeline commands ─────────────────────────────────────────────
@@ -1967,6 +2144,16 @@ export async function createCloudCheckout(
 ): Promise<import("./types").CheckoutResponse> {
   return invoke<import("./types").CheckoutResponse>("cloud_create_checkout", {
     plan,
+  });
+}
+
+export async function createCloudAddonCheckout(
+  addonId: "tally_connector",
+  interval: "month" | "year"
+): Promise<import("./types").CheckoutResponse> {
+  return invoke<import("./types").CheckoutResponse>("cloud_create_checkout", {
+    addonId,
+    interval,
   });
 }
 
