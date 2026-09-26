@@ -28,6 +28,39 @@ function fail(msg) {
   process.exit(1);
 }
 
+/** Prefer GITHUB_TOKEN in CI to avoid unauthenticated API rate-limit 403s. */
+function githubApiHeaders() {
+  const headers = {
+    "User-Agent": USER_AGENT,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const token = (
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN ||
+    ""
+  ).trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+function githubDownloadHeaders() {
+  const headers = { "User-Agent": USER_AGENT };
+  const token = (
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN ||
+    ""
+  ).trim();
+  // Release asset downloads from github.com do not need the API token, but
+  // attaching it is harmless and can help on throttled runners.
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 function osFolder() {
   if (process.platform === "win32") return "llama-win";
   if (process.platform === "darwin") return "llama-mac";
@@ -147,16 +180,22 @@ function ensureExecutableTree(rootDir) {
 }
 
 async function fetchLatestBinaryRelease() {
+  const headers = githubApiHeaders();
+  if (!headers.Authorization) {
+    log(
+      "Warning: no GITHUB_TOKEN/GH_TOKEN — unauthenticated GitHub API calls may hit 403 rate limits in CI",
+    );
+  }
+
   for (let page = 1; page <= 3; page += 1) {
     const url = `https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=100&page=${page}`;
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "application/vnd.github+json",
-      },
-    });
+    const response = await fetch(url, { headers });
     if (!response.ok) {
-      fail(`GitHub release list failed with status ${response.status}`);
+      const hint =
+        response.status === 403 || response.status === 429
+          ? " (rate limited — set GITHUB_TOKEN in CI)"
+          : "";
+      fail(`GitHub release list failed with status ${response.status}${hint}`);
     }
     const releases = await response.json();
     if (!Array.isArray(releases) || releases.length === 0) break;
@@ -182,7 +221,7 @@ async function downloadFile(url, dest) {
     fail(`Refusing untrusted download URL: ${url}`);
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  const response = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  const response = await fetch(url, { headers: githubDownloadHeaders() });
   if (!response.ok) {
     fail(`Download failed with status ${response.status}`);
   }

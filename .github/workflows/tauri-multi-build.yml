@@ -94,6 +94,9 @@ jobs:
 
       - name: Fetch llama.cpp release binaries
         working-directory: genhat-desktop
+        env:
+          # Authenticated API calls avoid shared-runner unauthenticated 403s.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run prepare:llama
 
       - name: Build Tauri App
