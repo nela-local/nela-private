@@ -140,6 +140,8 @@ async function fetchReleasesFrom(base: string): Promise<ReleasesData> {
     const res = await fetch(`${base}/api/releases`, {
       signal: ctrl.signal,
       headers: { Accept: "application/json" },
+      // Avoid stale CDN/browser cache — homepage update check must see new releases.
+      cache: "no-store",
     });
     if (!res.ok) throw new Error(`releases ${res.status}`);
     return (await res.json()) as ReleasesData;
