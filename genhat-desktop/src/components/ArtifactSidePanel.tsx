@@ -684,17 +684,17 @@ export default function ArtifactSidePanel({
 
   // Live Tally dashboard: iframe postMessage → Api.tally* → response.
   // Cache successful live tabs; on disconnect swap to last-shown snapshot.
+  const isLiveTallyHtml = Boolean(
+    displayHtml && /data-nela-tally-live/i.test(displayHtml)
+  );
   useEffect(() => {
-    const isLive = Boolean(
-      displayHtml && /data-nela-tally-live/i.test(displayHtml)
-    );
-    if (!isLive && !savedPath) {
+    if (!isLiveTallyHtml && !savedPath) {
       const detach = attachTallyLiveBridge(
         () => previewIframeRef.current?.contentWindow ?? null
       );
       return () => detach();
     }
-    if (!isLive) return;
+    if (!isLiveTallyHtml) return;
 
     const detach = attachTallyLiveBridge(
       () => previewIframeRef.current?.contentWindow ?? null,
@@ -725,11 +725,8 @@ export default function ArtifactSidePanel({
     );
     return () => detach();
     // Re-bind when path or live-ness changes, not on every HTML token.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    savedPath,
-    Boolean(displayHtml && /data-nela-tally-live/i.test(displayHtml)),
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- displayHtml intentionally omitted
+  }, [savedPath, isLiveTallyHtml]);
 
   /** Preview srcDoc — gate library rail; inject click-to-select while Edit is open. */
   const iframeSrcDoc = useMemo(() => {

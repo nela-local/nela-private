@@ -1,15 +1,14 @@
-import { useAuthStore } from "../stores/authStore";
 import { useCloudStore } from "../stores/cloudStore";
+import { useAuthStore } from "../stores/authStore";
 import { isPremiumAccount } from "./premiumAccess";
 
 /**
- * Tally Connector access: paid Cloud (Starter/Pro) AND active add-on.
+ * Tally Connector access follows server entitlement.addons.tallyConnector.active
+ * (paid Cloud + add-on, or complimentary early-access grant).
  * Missing addons field (old servers) → locked.
  */
 export function hasTallyConnectorAccess(): boolean {
   const entitlement = useCloudStore.getState().entitlement;
-  const profile = useAuthStore.getState().profile;
-  if (!isPremiumAccount({ profile, entitlement })) return false;
   return Boolean(entitlement?.addons?.tallyConnector?.active);
 }
 
@@ -17,6 +16,8 @@ export function hasTallyConnectorAccess(): boolean {
 export function tallyUpgradeReason(): "tally_needs_cloud" | "tally" {
   const entitlement = useCloudStore.getState().entitlement;
   const profile = useAuthStore.getState().profile;
+  // If the server already says active, this shouldn't be called — but be safe.
+  if (entitlement?.addons?.tallyConnector?.active) return "tally";
   if (!isPremiumAccount({ profile, entitlement })) return "tally_needs_cloud";
   return "tally";
 }

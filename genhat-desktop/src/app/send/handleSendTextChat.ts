@@ -476,13 +476,13 @@ export async function handleSendTextChat(
       /slide|deck|presentation/i.test(streamedArtifactTitle) ||
       (Boolean(body) && /class=["']slide/i.test(body));
     if (autoArtifacts && body) {
+      const workspaceId =
+        getParkedWorkspaceId(sid) ||
+        ctx.getChatGenerationOptions(ctx.selectedModel).workspaceId ||
+        useWorkspaceStore.getState().activeWorkspace?.id ||
+        null;
       try {
         await new Promise((r) => setTimeout(r, 0));
-        const workspaceId =
-          getParkedWorkspaceId(sid) ||
-          ctx.getChatGenerationOptions(ctx.selectedModel).workspaceId ||
-          useWorkspaceStore.getState().activeWorkspace?.id ||
-          null;
         const saved = await saveStreamedArtifact({
           type: streamedArtifactType,
           rawBody: body,

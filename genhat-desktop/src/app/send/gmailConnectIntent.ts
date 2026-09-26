@@ -8,9 +8,11 @@
  */
 
 export function looksLikeEmailRequest(_text: string): boolean {
+  void _text;
   return false;
 }
 
 export function looksLikeEmailReadRequest(_text: string): boolean {
+  void _text;
   return false;
 }

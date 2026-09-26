@@ -19,5 +19,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Legitimate for modal/form reset and async load kickoff; the recommended
+      // React 19 rule is too noisy for this codebase's existing patterns.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

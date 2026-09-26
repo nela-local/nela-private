@@ -123,7 +123,7 @@ export default function PdfViewer({ pdfData, title, onClose }: PdfViewerProps) {
   useEffect(() => {
     if (!pdfDoc) return;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset when doc/scale changes
+     
     setRenderedPages(new Set());
 
     // Render all pages

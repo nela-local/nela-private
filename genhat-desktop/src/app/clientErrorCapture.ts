@@ -37,8 +37,8 @@ function scrubSecrets(s: string): string {
   return s
     .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_REDACTED]")
     .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "[IP_REDACTED]")
-    .replace(/(bearer\s+)[a-z0-9._\-]{8,}/gi, "$1[TOKEN_REDACTED]")
-    .replace(/\b(sk-|nk-|ghp_|xox[baprs]-)[A-Za-z0-9_\-]{8,}/g, "[SECRET_REDACTED]");
+    .replace(/(bearer\s+)[a-z0-9._-]{8,}/gi, "$1[TOKEN_REDACTED]")
+    .replace(/\b(sk-|nk-|ghp_|xox[baprs]-)[A-Za-z0-9_-]{8,}/g, "[SECRET_REDACTED]");
 }
 
 function stringifyArg(arg: unknown): string {
