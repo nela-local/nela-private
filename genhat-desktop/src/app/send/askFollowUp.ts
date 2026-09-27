@@ -1,21 +1,16 @@
 /**
  * Sparse ask_followup host — at most one popup per user turn.
- * Used by the cloud tool loop and artifact-edit missing-data guards.
+ * Used by the cloud tool loop.
  */
 
 import {
   beginAskFollowUpTurn,
   bumpAskFollowUpTurnCount,
   cancelFollowUp,
-  getAskFollowUpTurnCount,
   openFollowUp,
   type FollowUpQuestion,
   type FollowUpResult,
 } from "../../stores/followUpStore";
-import {
-  isDataCorrectionWithoutValues,
-  isImageEditWithoutSource,
-} from "../artifactEdit";
 
 export type AskFollowUpArgs = {
   reason?: string;
@@ -156,88 +151,6 @@ export function formatFollowUpIntoPrompt(
     );
   }
   return parts.join("\n\n");
-}
-
-export type ArtifactEditFollowUpOutcome = {
-  status: "answered" | "cancelled" | "skipped" | "not_needed";
-  augmentedPrompt?: string;
-  attachedPaths: string[];
-};
-
-/**
- * Deterministic missing-data gate for artifact edits (no LLM tool hop).
- */
-export async function maybeAskFollowUpForArtifactEdit(opts: {
-  prompt: string;
-  attachedPaths: string[];
-  signal?: AbortSignal;
-  onStatus?: (message: string) => void;
-  turnId?: string;
-}): Promise<ArtifactEditFollowUpOutcome> {
-  const turnId = opts.turnId ?? `edit-${Date.now()}`;
-  beginAskFollowUpTurn(turnId);
-
-  const needsData = isDataCorrectionWithoutValues(opts.prompt);
-  const needsImage = isImageEditWithoutSource(opts.prompt, opts.attachedPaths);
-  if (!needsData && !needsImage) {
-    return { status: "not_needed", attachedPaths: opts.attachedPaths };
-  }
-
-  if (getAskFollowUpTurnCount() >= 1) {
-    return { status: "skipped", attachedPaths: opts.attachedPaths };
-  }
-
-  const questions: AskFollowUpArgs["questions"] = [];
-  if (needsData) {
-    questions.push({
-      id: "corrected_values",
-      prompt:
-        "Please paste the corrected numbers or values to use (I won’t invent replacements).",
-      input_type: "textarea",
-    });
-  }
-  if (needsImage) {
-    questions.push({
-      id: "image_note",
-      prompt:
-        "Describe the image to use, or attach/paste an image file below.",
-      input_type: "textarea",
-    });
-  }
-
-  const result = await executeAskFollowUp(
-    {
-      reason: needsData
-        ? "Need the corrected data before editing"
-        : "Need an image for this edit",
-      questions,
-      allow_attachments: needsImage || needsData,
-    },
-    {
-      turnId,
-      signal: opts.signal,
-      onStatus: (msg) => {
-        if (msg) opts.onStatus?.(msg);
-      },
-    }
-  );
-
-  if (result.status === "cancelled") {
-    return { status: "cancelled", attachedPaths: opts.attachedPaths };
-  }
-  if (result.status === "skipped") {
-    return { status: "skipped", attachedPaths: opts.attachedPaths };
-  }
-
-  const mergedPaths = [
-    ...opts.attachedPaths,
-    ...result.attachedPaths.filter((p) => !opts.attachedPaths.includes(p)),
-  ];
-  return {
-    status: "answered",
-    augmentedPrompt: formatFollowUpIntoPrompt(opts.prompt, result),
-    attachedPaths: mergedPaths,
-  };
 }
 
 /** Exported for unit tests. */

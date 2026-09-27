@@ -21,13 +21,15 @@ pub fn write_spreadsheet_plan(plan: SpreadsheetPlan) -> Result<(PathBuf, Option<
     let mut workbook = Workbook::new();
 
     let header_fmt = Format::new()
+        .set_font_name("Arial")
         .set_bold()
         .set_font_color(Color::White)
-        .set_background_color(Color::RGB(0x2173_46)) // Excel-green header
+        .set_background_color(Color::RGB(0x1F38_64)) // Navy header (analyst style)
         .set_border(FormatBorder::Thin)
-        .set_border_color(Color::RGB(0x1B5E_38));
+        .set_border_color(Color::RGB(0x1630_4F));
 
     let cell_fmt = Format::new()
+        .set_font_name("Arial")
         .set_border(FormatBorder::Thin)
         .set_border_color(Color::RGB(0xD0D0_D0));
 
@@ -85,6 +87,8 @@ fn resolve_sheets(plan: &SpreadsheetPlan) -> Vec<SpreadsheetSheet> {
         headers: plan.headers.clone(),
         rows: plan.source_rows.clone(),
         ops: plan.ops.clone(),
+        cell_fills: None,
+        cell_fonts: None,
     }]
 }
 
@@ -148,10 +152,67 @@ fn write_one_sheet(
         .map(|(i, h)| (h.clone(), i))
         .collect();
 
+    // Cache Format objects for sparse cell fills/fonts (keyed by style signature).
+    let mut style_fmts: HashMap<String, Format> = HashMap::new();
+    let fills = sheet.cell_fills.as_ref();
+    let fonts = sheet.cell_fonts.as_ref();
+
+    let resolve_style = |cache: &mut HashMap<String, Format>,
+                         fill_hex: Option<&str>,
+                         font_hex: Option<&str>,
+                         bold: bool,
+                         fallback: &Format|
+     -> Format {
+        let fill_n = fill_hex.and_then(normalize_fill_hex);
+        let font_n = font_hex.and_then(normalize_fill_hex);
+        if fill_n.is_none() && font_n.is_none() && !bold {
+            return fallback.clone();
+        }
+        let key = format!(
+            "{}|{}|{}",
+            fill_n.as_deref().unwrap_or("-"),
+            font_n.as_deref().unwrap_or("-"),
+            if bold { "b" } else { "" }
+        );
+        if let Some(existing) = cache.get(&key) {
+            return existing.clone();
+        }
+        let mut fmt = Format::new()
+            .set_font_name("Arial")
+            .set_border(FormatBorder::Thin)
+            .set_border_color(Color::RGB(0xD0D0_D0));
+        if bold {
+            fmt = fmt.set_bold();
+        }
+        if let Some(ref hex) = fill_n {
+            if let Ok(rgb) = u32::from_str_radix(&hex[1..], 16) {
+                fmt = fmt.set_background_color(Color::RGB(rgb));
+            }
+        }
+        if let Some(ref hex) = font_n {
+            if let Ok(rgb) = u32::from_str_radix(&hex[1..], 16) {
+                fmt = fmt.set_font_color(Color::RGB(rgb));
+            }
+        } else if fill_n.is_some() && bold {
+            // Dark header fills default to white text when font color omitted.
+            fmt = fmt.set_font_color(Color::White);
+        }
+        cache.insert(key, fmt.clone());
+        fmt
+    };
+
     // Write headers.
     for (col_idx, header) in working_headers.iter().enumerate() {
+        let key = format!("0:{col_idx}");
+        let fill = fills.and_then(|m| m.get(&key)).map(String::as_str);
+        let font = fonts.and_then(|m| m.get(&key)).map(String::as_str);
+        let write_fmt = if fill.is_some() || font.is_some() {
+            resolve_style(&mut style_fmts, fill, font, true, header_fmt)
+        } else {
+            header_fmt.clone()
+        };
         if let Err(e) =
-            worksheet.write_with_format(0, col_idx as u16, header.as_str(), header_fmt)
+            worksheet.write_with_format(0, col_idx as u16, header.as_str(), &write_fmt)
         {
             warnings.push(format!("Write header: {e}"));
         }
@@ -159,13 +220,29 @@ fn write_one_sheet(
 
     // Write data rows.
     for (row_idx, row) in working_rows.iter().enumerate() {
+        let excel_row = row_idx as u32 + 1;
         for (col_idx, cell) in row.iter().enumerate() {
+            let key = format!("{}:{}", row_idx + 1, col_idx);
+            let fill = fills.and_then(|m| m.get(&key)).map(String::as_str);
+            let font = fonts.and_then(|m| m.get(&key)).map(String::as_str);
+            let fmt_owned = if fill.is_some() || font.is_some() {
+                Some(resolve_style(
+                    &mut style_fmts,
+                    fill,
+                    font,
+                    false,
+                    cell_fmt,
+                ))
+            } else {
+                None
+            };
+            let fmt_ref = fmt_owned.as_ref().unwrap_or(cell_fmt);
             if let Err(e) = write_smart_cell(
                 worksheet,
-                row_idx as u32 + 1,
+                excel_row,
                 col_idx as u16,
                 cell,
-                cell_fmt,
+                fmt_ref,
             ) {
                 warnings.push(e);
             }
@@ -314,24 +391,61 @@ fn write_one_sheet(
                 headers: wd_headers,
                 rows: wd_rows,
             } => {
+                // Skip duplicate WRITE_DATA when the primary bare table was
+                // already written (same shape) — prevents blank-row + replay.
+                if wrote_primary_table
+                    && wd_headers == &working_headers
+                    && wd_rows == &working_rows
+                {
+                    continue;
+                }
                 // First WRITE_DATA on an empty sheet writes at the top.
                 let write_at = if !wrote_primary_table { 0 } else { next_row };
                 for (col_idx, header) in wd_headers.iter().enumerate() {
+                    // cell_fills keys are relative to the WRITE_DATA block
+                    // (0:col = header, 1:col = first data row), same as bare tables.
+                    let key = format!("0:{col_idx}");
+                    let fill = fills.and_then(|m| m.get(&key)).map(String::as_str);
+                    let font = fonts.and_then(|m| m.get(&key)).map(String::as_str);
+                    let write_fmt = if fill.is_some() || font.is_some() {
+                        resolve_style(&mut style_fmts, fill, font, true, header_fmt)
+                    } else {
+                        header_fmt.clone()
+                    };
                     if let Err(e) = worksheet.write_with_format(
                         write_at,
                         col_idx as u16,
                         header.as_str(),
-                        header_fmt,
+                        &write_fmt,
                     ) {
                         warnings.push(format!("Write WRITE_DATA header: {e}"));
                     }
                 }
                 let mut row_cursor = write_at + 1;
-                for row in wd_rows {
+                for (data_idx, row) in wd_rows.iter().enumerate() {
                     for (col_idx, cell) in row.iter().enumerate() {
-                        if let Err(e) =
-                            write_smart_cell(worksheet, row_cursor, col_idx as u16, cell, cell_fmt)
-                        {
+                        let key = format!("{}:{}", data_idx + 1, col_idx);
+                        let fill = fills.and_then(|m| m.get(&key)).map(String::as_str);
+                        let font = fonts.and_then(|m| m.get(&key)).map(String::as_str);
+                        let fmt_owned = if fill.is_some() || font.is_some() {
+                            Some(resolve_style(
+                                &mut style_fmts,
+                                fill,
+                                font,
+                                false,
+                                cell_fmt,
+                            ))
+                        } else {
+                            None
+                        };
+                        let fmt_ref = fmt_owned.as_ref().unwrap_or(cell_fmt);
+                        if let Err(e) = write_smart_cell(
+                            worksheet,
+                            row_cursor,
+                            col_idx as u16,
+                            cell,
+                            fmt_ref,
+                        ) {
                             warnings.push(e);
                         }
                     }
@@ -649,6 +763,43 @@ fn extract_http_url(text: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
+fn normalize_fill_hex(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    // rgb(r,g,b) / rgba(r,g,b,a)
+    if let Some(rest) = t
+        .strip_prefix("rgb(")
+        .or_else(|| t.strip_prefix("RGB("))
+        .or_else(|| t.strip_prefix("rgba("))
+        .or_else(|| t.strip_prefix("RGBA("))
+    {
+        let inner = rest.trim_end_matches(')');
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if parts.len() >= 3 {
+            let r: u32 = parts[0].parse().ok()?;
+            let g: u32 = parts[1].parse().ok()?;
+            let b: u32 = parts[2].parse().ok()?;
+            if r <= 255 && g <= 255 && b <= 255 {
+                return Some(format!("#{:02X}{:02X}{:02X}", r, g, b));
+            }
+        }
+        return None;
+    }
+    let s = t.trim_start_matches('#').to_ascii_uppercase();
+    let rgb = match s.len() {
+        8 => s[2..].to_string(), // AARRGGBB → RRGGBB
+        6 => s,
+        3 => s
+            .chars()
+            .flat_map(|c| [c, c])
+            .collect::<String>(),
+        _ => return None,
+    };
+    if !rgb.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{rgb}"))
+}
+
 fn write_smart_cell(
     worksheet: &mut Worksheet,
     row: u32,
@@ -656,8 +807,16 @@ fn write_smart_cell(
     cell: &str,
     fmt: &Format,
 ) -> Result<(), String> {
+    let trimmed = cell.trim();
+    // Excel formulas — write as formula so workbooks recalculate.
+    if trimmed.starts_with('=') && trimmed.len() > 1 {
+        worksheet
+            .write_formula_with_format(row, col, trimmed, fmt)
+            .map_err(|e| format!("Write formula: {e}"))?;
+        return Ok(());
+    }
     if let Some(url) = extract_http_url(cell) {
-        if url.len() == cell.trim().len() {
+        if url.len() == trimmed.len() {
             worksheet
                 .write_url_with_format(row, col, Url::new(url), fmt)
                 .map_err(|e| format!("Write URL: {e}"))?;
@@ -665,7 +824,7 @@ fn write_smart_cell(
         }
     }
     if let Some(n) = parse_number(cell) {
-        if !cell.trim().starts_with('0') || cell.trim() == "0" || cell.contains('.') {
+        if !trimmed.starts_with('0') || trimmed == "0" || cell.contains('.') {
             worksheet
                 .write_number_with_format(row, col, n, fmt)
                 .map_err(|e| format!("Write number: {e}"))?;

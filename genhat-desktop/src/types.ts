@@ -533,7 +533,6 @@ export type IntentKind =
   | { kind: "Chat" }
   | { kind: "FileSearch" }
   | { kind: "Artifact"; tool: string; schema_id: string }
-  | { kind: "Patch"; artifact_path: string }
   | { kind: "Summarize" };
 
 export interface IntentDecision {
@@ -568,6 +567,10 @@ export interface SpreadsheetSheet {
   rows?: string[][];
   /** Optional per-sheet ops (WRITE_DATA, charts, etc.). */
   ops?: SpreadsheetOp[];
+  /** Sparse fills keyed `"row:col"` (0-based, header is row 0) → `#RRGGBB`. */
+  cell_fills?: Record<string, string>;
+  /** Sparse font colors keyed like cell_fills → `#RRGGBB` (e.g. blue inputs). */
+  cell_fonts?: Record<string, string>;
 }
 
 export interface SpreadsheetPlan {
@@ -675,6 +678,10 @@ export interface ArtifactResult {
   path: string;
   kind: string;
   warning?: string;
+  /** Formula errors found after LibreOffice recalc (Sheet!Cell: #DIV/0!). */
+  formulaErrors?: string[];
+  /** True when LibreOffice headless recalculated the workbook. */
+  recalculated?: boolean;
 }
 
 export interface FileRecord {

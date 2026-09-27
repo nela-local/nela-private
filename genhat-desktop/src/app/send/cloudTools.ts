@@ -130,7 +130,8 @@ export const LOCAL_SHELL_TOOL: CloudToolDefinition = {
       "Allowed programs only: ls, cat, head, tail, wc, grep, rg, find (find without -exec/-delete). " +
       "Pass argv as a JSON array of strings — never a shell string, pipes, redirects, or bash/sh -c. " +
       "Typical flow: search_knowledge_base → then local_shell with cat/head/grep on the absolute path. " +
-      "Do NOT use for write/delete/network. Do NOT invent paths — use paths from tool results or the user.",
+      "Do NOT use for write/delete/network. Do NOT invent paths — use paths from tool results or the user. " +
+      "NOT for creating Excel/Python workbooks — that is run_xlsx_python (openpyxl on NELA Cloud). local_shell cannot run python/pip.",
     parameters: {
       type: "object",
       properties: {
@@ -158,7 +159,10 @@ export const MCP_SPREADSHEET_TOOL: CloudToolDefinition = {
   function: {
     name: "generate_spreadsheet",
     description:
-      "Create an Excel spreadsheet (.xlsx) on the user's device. Prefer multiple sheets when the topic has distinct tables (e.g. Itinerary + Budget). Pass sheets[{name, headers, rows}].",
+      "Create a simple tabular Excel workbook (.xlsx) from sheets[{name,headers,rows}]. " +
+      "Prefer run_xlsx_python for analyst-quality / color-coded / titled financial workbooks (titles, font sizes, merges, legends). " +
+      "Use this for plain tables, CSV salvage, or when openpyxl is unnecessary. " +
+      "Do NOT use generate_html for Excel. Do NOT paste CSV into chat.",
     parameters: {
       type: "object",
       properties: {
@@ -174,7 +178,7 @@ export const MCP_SPREADSHEET_TOOL: CloudToolDefinition = {
         sheets: {
           type: "array",
           description:
-            "One or more worksheets. Use multiple entries for distinct tables — never cram unrelated data into one sheet.",
+            "One or more worksheets. Use multiple entries for distinct tables — never cram unrelated data into one sheet. Add a Legend sheet when using colors.",
           items: {
             type: "object",
             properties: {
@@ -189,6 +193,21 @@ export const MCP_SPREADSHEET_TOOL: CloudToolDefinition = {
               rows: {
                 type: "array",
                 items: { type: "array", items: { type: "string" } },
+                description:
+                  "Data rows. Use Excel formulas as strings starting with = (e.g. =B5-C5). Prefer formulas for change columns.",
+              },
+              cell_fills: {
+                type: "object",
+                description:
+                  'Sparse background colors. Keys: "row:col" or A1. Values: #RRGGBB (also accepts rgb()). ' +
+                  "Palette: #1F3864 title/header, #8EA9DB section, #E8F5E9 positive, #FFEBEE negative, #FFF3E0 warning.",
+                additionalProperties: { type: "string" },
+              },
+              cell_fonts: {
+                type: "object",
+                description:
+                  'Sparse font colors. Keys like cell_fills. Use #0000FF for hardcoded inputs, #FFFFFF on dark headers, #008000 for cross-sheet links.',
+                additionalProperties: { type: "string" },
               },
             },
             required: ["name", "headers", "rows"],
@@ -196,6 +215,41 @@ export const MCP_SPREADSHEET_TOOL: CloudToolDefinition = {
         },
       },
       required: ["sheets"],
+      additionalProperties: true,
+    },
+  },
+};
+
+/** Constrained openpyxl sandbox for Claude-style rich workbooks. */
+export const MCP_XLSX_PYTHON_TOOL: CloudToolDefinition = {
+  type: "function",
+  function: {
+    name: "run_xlsx_python",
+    description:
+      "Create a rich downloadable Excel workbook via openpyxl Python. " +
+      "This IS the Python sandbox — code runs on NELA Cloud (openpyxl + pandas preinstalled, LibreOffice recalculates formulas); the desktop only saves the .xlsx. " +
+      "Do NOT claim Python is unavailable; do NOT use local_shell or generate_html as a substitute. " +
+      "PREFERRED for color-coded financial models, titled sheets, mixed font sizes, merges, legends, and narrative cells. " +
+      "Numbers: round all numeric values to 2 decimal places and set cell number_format to '0.00' or '#,##0.00' " +
+      "(percentages '0.00%') unless the user explicitly asks for a different precision. " +
+      "Pass a complete Python script that builds a Workbook and saves with wb.save(os.environ['NELA_XLSX_OUT']). " +
+      "Do not pip install. No network/shell inside the script. " +
+      "If the tool returns formula_errors, fix them and call again. Follow the Excel skill.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description:
+            "Full Python script using openpyxl. Must save to os.environ['NELA_XLSX_OUT']. " +
+            "Round numbers to 2 decimal places and apply number_format '0.00' / '#,##0.00' unless the user asked otherwise.",
+        },
+        output_name: {
+          type: "string",
+          description: "Short filename stem without extension",
+        },
+      },
+      required: ["code"],
       additionalProperties: true,
     },
   },
@@ -239,8 +293,11 @@ export const MCP_HTML_TOOL: CloudToolDefinition = {
   function: {
     name: "generate_html",
     description:
-      "Create an HTML page or dashboard on the user's device. Prefer a light readable design. " +
-      "For dashboards: pass compact freeform `html` with <div data-nela-chart=\"nela-chart:N\"></div> markers " +
+      "Create an HTML page or interactive dashboard on the user's device (web page / charts UI). " +
+      "NEVER use this for Excel, .xlsx, spreadsheet, workbook, or “color-coded Excel” requests — those MUST use run_xlsx_python (rich) or generate_spreadsheet (simple tables). " +
+      "Styled HTML tables are not Excel files and cannot be downloaded as .xlsx. " +
+      "Never claim Python is unavailable as a reason to emit HTML instead of calling run_xlsx_python. " +
+      "Prefer a light readable design. For dashboards: pass compact freeform `html` with <div data-nela-chart=\"nela-chart:N\"></div> markers " +
       "from prior render_chart calls, OR structured `sections`. Keep HTML under ~100KB — summarize tables, do not dump full ledgers. " +
       "Do not invent Chart.js.",
     parameters: {
@@ -449,6 +506,7 @@ export const ASK_FOLLOWUP_TOOL: CloudToolDefinition = {
 };
 
 export const MCP_CLOUD_TOOLS: CloudToolDefinition[] = [
+  MCP_XLSX_PYTHON_TOOL,
   MCP_SPREADSHEET_TOOL,
   MCP_PRESENTATION_TOOL,
   MCP_HTML_TOOL,

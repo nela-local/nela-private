@@ -12,8 +12,6 @@ pub enum IntentKind {
     FileSearch,
     /// Artifact synthesis via a named MCP tool.
     Artifact { tool: String, schema_id: String },
-    /// Iterative diff-patch applied to an existing artifact.
-    Patch { artifact_path: String },
     /// Summarisation of a document or conversation.
     Summarize,
 }
@@ -58,16 +56,6 @@ impl IntentDecision {
             kind: IntentKind::Artifact {
                 tool: tool.into(),
                 schema_id: schema_id.into(),
-            },
-            tier: 0,
-            confidence: 1.0,
-        }
-    }
-
-    pub fn patch(artifact_path: impl Into<String>) -> Self {
-        Self {
-            kind: IntentKind::Patch {
-                artifact_path: artifact_path.into(),
             },
             tier: 0,
             confidence: 1.0,

@@ -345,28 +345,10 @@ pub fn parse_spreadsheet_plan(mut value: Value) -> Result<SpreadsheetPlan, Strin
                         normalize_spreadsheet_op(op);
                     }
                 }
-                // Lift bare headers/rows into WRITE_DATA when ops empty
-                let has_ops = obj
-                    .get("ops")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|a| !a.is_empty());
-                if !has_ops {
-                    let headers = obj.get("headers").cloned().unwrap_or(Value::Array(vec![]));
-                    let rows = obj
-                        .get("rows")
-                        .cloned()
-                        .unwrap_or(Value::Array(vec![]));
-                    if headers.as_array().is_some_and(|h| !h.is_empty()) {
-                        obj.insert(
-                            "ops".to_string(),
-                            Value::Array(vec![serde_json::json!({
-                                "op": "WRITE_DATA",
-                                "headers": headers,
-                                "rows": rows,
-                            })]),
-                        );
-                    }
-                }
+                // Keep bare headers/rows on the sheet. The XLSX writer already
+                // renders them — do NOT lift into WRITE_DATA (that double-wrote
+                // the table: once from bare fields, again from the injected op).
+                // Legacy callers that only send WRITE_DATA in ops still work.
             }
         }
     }

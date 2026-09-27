@@ -3,6 +3,8 @@ import { useMemo, useState, type CSSProperties } from "react";
 export interface ExcelSheetTab {
   name: string;
   rows: string[][];
+  /** Optional sparse fills for this sheet (`"r:c"` → `#RRGGBB`). */
+  cellFills?: Record<string, string>;
 }
 
 export interface ExcelSheetGridProps {
@@ -13,7 +15,7 @@ export interface ExcelSheetGridProps {
   sheets?: ExcelSheetTab[];
   /** Treat row 0 as a styled header bar. */
   headerRow?: boolean;
-  /** Optional per-cell background colors as `#RRGGBB` (sparse). */
+  /** Optional per-cell background colors as `#RRGGBB` (sparse). Overridden by per-tab fills. */
   cellFills?: Record<string, string>;
   maxRows?: number;
   maxCols?: number;
@@ -52,7 +54,7 @@ export default function ExcelSheetGrid({
   const tabs: ExcelSheetTab[] =
     sheets && sheets.length > 0
       ? sheets
-      : [{ name: sheetName, rows }];
+      : [{ name: sheetName, rows, cellFills }];
 
   const [activeIdx, setActiveIdx] = useState(0);
   const sheetKey = tabs.map((t) => t.name).join("\0");
@@ -62,7 +64,12 @@ export default function ExcelSheetGrid({
     setActiveIdx(0);
   }
   const safeIdx = Math.min(Math.max(0, activeIdx), Math.max(0, tabs.length - 1));
-  const active = tabs[safeIdx] ?? { name: sheetName, rows };
+  const active = tabs[safeIdx] ?? { name: sheetName, rows, cellFills };
+  const activeFills = active.cellFills ?? cellFills;
+  const hasFileHeaderFill = Boolean(
+    activeFills &&
+      Object.keys(activeFills).some((k) => k.startsWith("0:"))
+  );
 
   const { colCount, displayRows, truncated } = useMemo(() => {
     const cols = active.rows.reduce((m, r) => Math.max(m, r.length), 0);
@@ -114,11 +121,15 @@ export default function ExcelSheetGrid({
                   </th>
                   {Array.from({ length: colCount }, (_, ci) => {
                     const value = row[ci] ?? "";
-                    const fill = cellFills?.[cellKey(ri, ci)];
+                    const fill = activeFills?.[cellKey(ri, ci)];
                     const style: CSSProperties = {};
                     if (fill) {
                       style.backgroundColor = fill.startsWith("#") ? fill : `#${fill}`;
-                    } else if (isHeader) {
+                      if (isHeader) {
+                        style.color = "#ffffff";
+                        style.fontWeight = 600;
+                      }
+                    } else if (isHeader && !hasFileHeaderFill) {
                       style.backgroundColor = "#217346";
                       style.color = "#ffffff";
                       style.fontWeight = 600;
@@ -134,7 +145,7 @@ export default function ExcelSheetGrid({
                       <td
                         key={ci}
                         className={`min-w-[88px] max-w-[220px] h-[22px] px-1.5 border border-[#d0d0d0] truncate align-middle ${
-                          isHeader ? "" : "bg-white hover:bg-[#e8f2fe]"
+                          isHeader || fill ? "" : "bg-white hover:bg-[#e8f2fe]"
                         }`}
                         style={style}
                         title={value}

@@ -198,10 +198,45 @@ function displayHeaders(keys: string[]): string[] {
   });
 }
 
+const FILL_HEADER = "#217346";
+const FILL_RECEIVABLE = "#D1FAE5"; // green-100
+const FILL_PAYABLE = "#FEF3C7"; // amber-100
+const FILL_OVERDUE = "#FEE2E2"; // red-100
+const FILL_AGING_30 = "#DBEAFE"; // blue-100
+const FILL_AGING_60 = "#FEF3C7";
+const FILL_AGING_90 = "#FFEDD5"; // orange-100
+const FILL_AGING_90P = "#FEE2E2";
+const FILL_NOTE = "#FEF3C7";
+
+function headerFills(colCount: number): Record<string, string> {
+  const fills: Record<string, string> = {};
+  for (let c = 0; c < colCount; c += 1) {
+    fills[`0:${c}`] = FILL_HEADER;
+  }
+  return fills;
+}
+
+function parseDays(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.floor(raw);
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number.parseFloat(raw.replace(/,/g, ""));
+    if (Number.isFinite(n)) return Math.floor(n);
+  }
+  return null;
+}
+
+function agingFill(days: number): string {
+  if (days <= 30) return FILL_AGING_30;
+  if (days <= 60) return FILL_AGING_60;
+  if (days <= 90) return FILL_AGING_90;
+  return FILL_AGING_90P;
+}
+
 function recordsToSheet(
   name: string,
   keys: string[],
-  records: Array<Record<string, unknown>>
+  records: Array<Record<string, unknown>>,
+  report?: TallyExportReport
 ): SpreadsheetSheet {
   const headers = displayHeaders(keys);
   const rows = records.map((r) =>
@@ -211,7 +246,31 @@ function recordsToSheet(
       return String(v);
     })
   );
-  return { name, headers, rows, ops: [] };
+  const fills: Record<string, string> = headerFills(headers.length);
+
+  // Outstanding / daybook: color whole data rows by aging when a days-like column exists.
+  const daysKeyIdx = keys.findIndex((k) =>
+    /^(days|overdue_days|age|aging|outstanding_days)$/i.test(k)
+  );
+  if (daysKeyIdx >= 0) {
+    records.forEach((r, ri) => {
+      const days = parseDays(r[keys[daysKeyIdx]!]);
+      if (days == null || days < 0) return;
+      const fill = agingFill(days);
+      for (let c = 0; c < headers.length; c += 1) {
+        fills[`${ri + 1}:${c}`] = fill;
+      }
+    });
+  } else if (report === "outstanding") {
+    // Soft tint all data rows as receivables-style when no aging column.
+    for (let ri = 0; ri < rows.length; ri += 1) {
+      for (let c = 0; c < headers.length; c += 1) {
+        fills[`${ri + 1}:${c}`] = FILL_RECEIVABLE;
+      }
+    }
+  }
+
+  return { name, headers, rows, ops: [], cell_fills: fills };
 }
 
 function summarySheet(meta: {
@@ -252,11 +311,37 @@ function summarySheet(meta: {
       "Export hit the row cap — results may be incomplete. Narrow the date range or filters.",
     ]);
   }
+
+  const fills: Record<string, string> = headerFills(2);
+  const reportLower = meta.report.toLowerCase();
+  // Row 1 is Report (after header) → index 1
+  if (reportLower.includes("outstanding") || reportLower.includes("receiv")) {
+    fills["1:0"] = FILL_RECEIVABLE;
+    fills["1:1"] = FILL_RECEIVABLE;
+  } else if (reportLower.includes("payable") || reportLower.includes("creditor")) {
+    fills["1:0"] = FILL_PAYABLE;
+    fills["1:1"] = FILL_PAYABLE;
+  }
+  // Truncated / Note rows
+  lines.forEach((line, i) => {
+    if (i === 0) return;
+    const field = (line[0] ?? "").toLowerCase();
+    if (field === "truncated" && meta.truncated) {
+      fills[`${i}:0`] = FILL_OVERDUE;
+      fills[`${i}:1`] = FILL_OVERDUE;
+    }
+    if (field === "note") {
+      fills[`${i}:0`] = FILL_NOTE;
+      fills[`${i}:1`] = FILL_NOTE;
+    }
+  });
+
   return {
     name: "Summary",
     headers: lines[0],
     rows: lines.slice(1),
     ops: [],
+    cell_fills: fills,
   };
 }
 
@@ -531,21 +616,24 @@ export async function buildTallyExcelWorkbook(
       headers: template.mapping.headers,
       rows: projectRecordsToTemplate(template.mapping, fetched.records),
       ops: [],
+      cell_fills: headerFills(template.mapping.headers.length),
     });
     if (args.includeRaw) {
-      sheets.push(recordsToSheet("Raw", fetched.keys, fetched.records));
+      sheets.push(recordsToSheet("Raw", fetched.keys, fetched.records, args.report));
     }
   } else if (args.includeRaw !== false) {
-    sheets.push(recordsToSheet("Raw", fetched.keys, fetched.records));
+    sheets.push(recordsToSheet("Raw", fetched.keys, fetched.records, args.report));
   }
 
   if (pivotSpec) {
     const matrix = computeCrosstab(fetched.records, pivotSpec);
+    const pivotFills = headerFills(matrix.headers.length);
     sheets.push({
       name: "Pivot",
       headers: matrix.headers,
       rows: matrix.rows,
       ops: [],
+      cell_fills: pivotFills,
     });
   }
   sheets.push(

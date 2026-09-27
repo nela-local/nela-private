@@ -26,12 +26,19 @@ import {
   fileUrlToPath,
   isLocalFileHitUrl,
 } from "./fileSearchCitations";
+import {
+  extractQueriesFromFacetDump,
+  looksLikeMisplacedToolOrPlannerPayload,
+  maxToolPayloadRepairs,
+  toolCallRepairUserMessage,
+} from "./toolCallRepair";
 
 export const WEB_SEARCH_TOOL_SYSTEM = `You have a web_search tool for live public-web facts.
 Call it ONLY when you need current/external information — never by default.
 Reply with ONLY this JSON (no markdown):
 {"tool":"web_search","query":"concise keyword query","depth":"snippet|full|standard|deep"}
 depth meanings: snippet = quick facts; full = richer page content; standard = multi-facet research; deep = exhaustive multi-facet research.
+Never reply with a research plan or list of search queries; search planning is done by the host. For multi-facet work call web_search with depth=standard or deep (or several web_search calls).
 Optional after web_search: {"tool":"web_extract","urls":["https://..."],"query":"what you need"}
 Include the explicit period (quarter/month/year) in the query for time-sensitive questions.
 Cite web results with inline [n] markers only (no raw URLs).`;
@@ -420,6 +427,7 @@ export async function runWebSearchToolLoop(
   });
   let webSearchResult: WebSearchResult | null = null;
   let thinking = "";
+  let payloadRepairs = 0;
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -452,7 +460,92 @@ export async function runWebSearchToolLoop(
       // Never inject tools the model did not request (including file search).
 
       if (calls.length === 0) {
-        if (decision.content.trim()) {
+        const content = decision.content.trim();
+        if (
+          content &&
+          looksLikeMisplacedToolOrPlannerPayload(content) &&
+          payloadRepairs < maxToolPayloadRepairs() &&
+          round + 1 < MAX_TOOL_ROUNDS
+        ) {
+          payloadRepairs += 1;
+          opts.onToolStatus?.("Fixing tool call…");
+          messages = [
+            ...messages,
+            { role: "assistant", content: decision.content },
+            {
+              role: "user",
+              content: toolCallRepairUserMessage("json-host"),
+            },
+          ];
+          continue;
+        }
+        if (content && looksLikeMisplacedToolOrPlannerPayload(content)) {
+          // Never stream facet plans. Prefer host-running extracted queries.
+          const queries = extractQueriesFromFacetDump(content);
+          if (queries.length > 0 && webEnabled && round + 1 < MAX_TOOL_ROUNDS) {
+            opts.onToolStatus?.(
+              queries.length > 1
+                ? `Searching the web (${queries.length} queries)…`
+                : `Searching the web for “${queries[0]}”…`
+            );
+            const { runWebSearchWithDepth } = await import("./webSearchDepth");
+            const bodies: string[] = [];
+            let merged: WebSearchResult | null = webSearchResult;
+            for (const q of queries) {
+              try {
+                const result = await runWebSearchWithDepth({
+                  query: q,
+                  depth: "snippet",
+                  messages: messages.filter(
+                    (m) =>
+                      m.role === "user" ||
+                      m.role === "assistant" ||
+                      m.role === "system"
+                  ) as import("../../types").ChatContextMessage[],
+                  modelId: opts.modelId,
+                  signal: opts.signal,
+                  onToolStatus: opts.onToolStatus,
+                });
+                merged =
+                  result.results.length > 0 || result.formatted_context?.trim()
+                    ? mergeWebSearchResults(merged, result)
+                    : merged;
+                bodies.push(
+                  result.formatted_context?.trim() ||
+                    (result.results.length === 0
+                      ? `No results for ${q}`
+                      : result.results
+                          .map((h, i) => `${i + 1}. ${h.title}\n${h.snippet}\n${h.url}`)
+                          .join("\n\n"))
+                );
+              } catch (e) {
+                bodies.push(`web_search failed: ${e}`);
+              }
+            }
+            webSearchResult = merged;
+            messages = [
+              ...messages,
+              { role: "assistant", content: decision.content },
+              {
+                role: "user",
+                content:
+                  `Tool results:\n${bodies.join("\n\n---\n\n")}\n\n` +
+                  "Do not write any JSON. Answer in prose with inline [n] citations.",
+              },
+            ];
+            continue;
+          }
+          const fallback =
+            "I hit an internal research-plan format instead of searching. Please try again.";
+          opts.onChunk(fallback);
+          return {
+            content: fallback,
+            thinking,
+            webSearchResult,
+            model: opts.modelId?.trim() || undefined,
+          };
+        }
+        if (content) {
           opts.onChunk(decision.content);
           return {
             content: decision.content,

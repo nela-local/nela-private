@@ -59,7 +59,7 @@ import {
   embedPoolChartsInHtml,
   type ChartPoolEntry,
 } from "../artifactChartPool";
-import { normalizeSpreadsheetPlan } from "../spreadsheetPlan";
+import { normalizeSpreadsheetPlan, wantsSpreadsheetColorCoding } from "../spreadsheetPlan";
 import {
   ARTIFACT_CREATING_TOOLS,
   isPrivateMode,
@@ -74,6 +74,22 @@ import { useTelegramConnectPromptStore } from "../../stores/telegramConnectPromp
 import { looksLikeDriveRequest } from "./driveConnectIntent";
 import { looksLikeTallyRequest } from "./tallyConnectIntent";
 import { useDriveConnectPromptStore } from "../../stores/driveConnectPromptStore";
+import {
+  extractQueriesFromFacetDump,
+  looksLikeMisplacedToolOrPlannerPayload,
+  maxToolPayloadRepairs,
+  toolCallRepairUserMessage,
+} from "./toolCallRepair";
+import {
+  looksLikeCsvWorkbookDump,
+  parseCsvWorkbookDump,
+  spreadsheetCsvDumpRepairUserMessage,
+  userAskedForSpreadsheetArtifact,
+} from "./csvWorkbookDump";
+import {
+  presentationSkillReminder,
+  spreadsheetSkillReminder,
+} from "./agentSkills";
 
 /** Vite/WebView stale-chunk failures — must not dump connector turns onto local. */
 function isStaleModuleImportError(err: unknown): boolean {
@@ -200,6 +216,45 @@ function flattenMessageContent(content: CloudChatMessage["content"]): string {
       .join("\n");
   }
   return content ?? "";
+}
+
+/** Host-side salvage: CSV dump in chat → real .xlsx via generate_spreadsheet path. */
+async function salvageCsvWorkbookDumpToArtifact(
+  content: string,
+  userPrompt: string,
+  opts: CloudNativeToolLoopOptions
+): Promise<ArtifactResult | null> {
+  const sheets = parseCsvWorkbookDump(content);
+  if (sheets.length === 0) return null;
+  try {
+    opts.onToolStatus?.("Building spreadsheet…");
+    const artifact = await Api.generateSpreadsheet(
+      normalizeSpreadsheetPlan(
+        {
+          sheets: sheets.map((s) => ({
+            name: s.name,
+            headers: s.headers,
+            rows: s.rows,
+          })),
+          output_name:
+            userPrompt.slice(0, 48).replace(/[^\w\s-]+/g, "").trim() ||
+            "spreadsheet",
+        },
+        {
+          prompt: userPrompt || "spreadsheet",
+          hasSourceData: false,
+          ensureColorFills: wantsSpreadsheetColorCoding(userPrompt),
+        }
+      )
+    );
+    opts.onArtifact?.(artifact);
+    opts.onToolStatus?.(null);
+    return artifact;
+  } catch (e) {
+    console.warn("CSV workbook dump salvage failed:", e);
+    opts.onToolStatus?.(null);
+    return null;
+  }
 }
 
 function toTextMessages(
@@ -365,7 +420,10 @@ async function executeToolCall(
     args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
   } catch {
     return {
-      content: `Invalid JSON arguments for ${name}`,
+      content:
+        `Invalid JSON arguments for ${name}. Call ${name} again with valid JSON arguments ` +
+        `(for web_search include {"query":"...","depth":"snippet|full|standard|deep"}). ` +
+        `Never write a research plan or JSON into the chat.`,
       webSearchResult,
     };
   }
@@ -384,7 +442,13 @@ async function executeToolCall(
   if (name === "web_search") {
     let query = typeof args.query === "string" ? args.query.trim() : "";
     if (!query) {
-      return { content: "web_search requires a query", webSearchResult };
+      return {
+        content:
+          "web_search requires a query. Call web_search again with " +
+          '{"query":"short keywords","depth":"snippet|full|standard|deep"}. ' +
+          "Never write a research plan or JSON into the chat.",
+        webSearchResult,
+      };
     }
     try {
       query = await groundWebSearchQuery(query, {
@@ -608,10 +672,16 @@ async function executeToolCall(
 
   if (name === "generate_spreadsheet") {
     try {
+      const lastUser = [...opts.messages].reverse().find((m) => m.role === "user");
+      const userPrompt = lastUser
+        ? flattenMessageContent(lastUser.content as CloudChatMessage["content"])
+        : "spreadsheet";
       const artifact = await Api.generateSpreadsheet(
         normalizeSpreadsheetPlan(args as Record<string, unknown>, {
-          prompt: "spreadsheet",
+          prompt: userPrompt,
           hasSourceData: false,
+          // Host fills in when the user asked for color coding and the model omitted cell_fills.
+          ensureColorFills: wantsSpreadsheetColorCoding(userPrompt),
         })
       );
       opts.onArtifact?.(artifact);
@@ -627,6 +697,53 @@ async function executeToolCall(
     } catch (e) {
       return {
         content: `generate_spreadsheet failed: ${e}`,
+        webSearchResult,
+      };
+    }
+  }
+
+  if (name === "run_xlsx_python") {
+    try {
+      const code = typeof args.code === "string" ? args.code : "";
+      if (!code.trim()) {
+        return {
+          content:
+            "run_xlsx_python requires `code` — a full openpyxl script that saves to os.environ['NELA_XLSX_OUT'].",
+          webSearchResult,
+        };
+      }
+      const outputName =
+        (typeof args.output_name === "string" && args.output_name.trim()) ||
+        (typeof args.outputName === "string" && args.outputName.trim()) ||
+        (typeof args.title === "string" && args.title.trim()) ||
+        undefined;
+      opts.onToolStatus?.("Building Excel workbook…");
+      const artifact = await Api.runXlsxPython(code, outputName || undefined);
+      opts.onArtifact?.(artifact);
+      opts.onToolStatus?.(null);
+      const formulaErrors = artifact.formulaErrors ?? [];
+      return {
+        content: JSON.stringify({
+          ok: formulaErrors.length === 0,
+          path: artifact.path,
+          kind: artifact.kind ?? "xlsx",
+          recalculated: artifact.recalculated ?? false,
+          formula_errors: formulaErrors,
+          warning: artifact.warning ?? null,
+          ...(formulaErrors.length > 0
+            ? {
+                next:
+                  "Fix the listed formula errors and call run_xlsx_python again with corrected openpyxl code.",
+              }
+            : {}),
+        }),
+        webSearchResult,
+        artifact,
+      };
+    } catch (e) {
+      opts.onToolStatus?.(null);
+      return {
+        content: `run_xlsx_python failed: ${e}`,
         webSearchResult,
       };
     }
@@ -1399,6 +1516,8 @@ export async function runCloudNativeToolLoop(
   const tools = buildCloudChatTools({
     webEnabled,
     fileSearchEnabled,
+    // Default ON in cloud chat. Callers that must suppress artifacts (research-only
+    // passes) set includeMcpTools: false explicitly.
     mcpEnabled: !privateMode && loopOpts.includeMcpTools !== false,
     chartEnabled: !privateMode && Boolean(loopOpts.chartEnabled),
     askFollowUpEnabled: true,
@@ -1434,6 +1553,12 @@ export async function runCloudNativeToolLoop(
   const hasTally = tools.some((t) => t.function.name.startsWith("tally_"));
   const hasRemember = tools.some((t) => t.function.name === "remember_user_fact");
   const hasComputerUse = tools.some((t) => t.function.name === "computer_goal");
+  const hasSpreadsheet = tools.some((t) => t.function.name === "generate_spreadsheet");
+  const hasXlsxPython = tools.some((t) => t.function.name === "run_xlsx_python");
+  const hasHtml = tools.some((t) => t.function.name === "generate_html");
+  const hasPresentation = tools.some(
+    (t) => t.function.name === "generate_presentation"
+  );
   if (
     hasWebSearch ||
     hasFileSearch ||
@@ -1444,9 +1569,49 @@ export async function runCloudNativeToolLoop(
     hasDrive ||
     hasTally ||
     hasRemember ||
-    hasComputerUse
+    hasComputerUse ||
+    hasSpreadsheet ||
+    hasXlsxPython ||
+    hasHtml ||
+    hasPresentation
   ) {
     const parts: string[] = [];
+    if (hasSpreadsheet || hasXlsxPython || hasHtml || hasPresentation) {
+      parts.push(
+        "Artifact tool routing: " +
+          (hasXlsxPython
+            ? "For analyst-quality / color-coded / titled Excel (financial models, legends, font sizes, merges), " +
+              "prefer run_xlsx_python with openpyxl — save via wb.save(os.environ['NELA_XLSX_OUT']). "
+            : "") +
+          (hasSpreadsheet
+            ? "Use generate_spreadsheet for simple tabular sheets[{name,headers,rows}]. " +
+              "Never build an “Excel-compatible HTML table” with generate_html. "
+            : "") +
+          (hasHtml
+            ? "Use generate_html only for web pages / interactive dashboards (charts UI), not for Excel files. "
+            : "") +
+          (hasPresentation
+            ? "Use generate_presentation for slide decks. "
+            : "") +
+          "After web research for a spreadsheet request: call run_xlsx_python or generate_spreadsheet — do not stop at HTML or paste CSV. " +
+          "local_shell is read-only file inspection only — it is NOT the Excel Python sandbox. " +
+          "Never tell the user Python is unavailable; call run_xlsx_python instead."
+      );
+    }
+    if (hasSpreadsheet || hasXlsxPython) {
+      parts.push(spreadsheetSkillReminder());
+      parts.push(
+        "Spreadsheet quality check: " +
+          (hasXlsxPython
+            ? "prefer run_xlsx_python for rich workbooks; round all numbers to 2 decimal places and set number_format 0.00 / #,##0.00 (0.00% for ratios) unless the user asked for different precision; "
+            : "") +
+          "never paste ```csv``` or Sheet1 blocks into chat; " +
+          "never put narrative-only junk on a Sheet1 tab."
+      );
+    }
+    if (hasPresentation) {
+      parts.push(presentationSkillReminder());
+    }
     if (hasComputerUse) {
       parts.push(
         "You have computer_goal to operate the user's real computer via Computer Use. " +
@@ -1471,6 +1636,8 @@ export async function runCloudNativeToolLoop(
         "You have a web_search tool. Call it ONLY when you need live web facts — never automatically. " +
           "Every call MUST include query and depth (snippet | full | standard | deep). " +
           "snippet = quick facts; full = richer page content; standard = multi-facet research; deep = exhaustive multi-facet research. " +
+          "Never write a research plan or list of search queries into the chat — search planning is done by the host. " +
+          "For multi-facet work, call web_search with depth=standard|deep (or emit several web_search tool calls). " +
           `For anything time-sensitive, put the requested period in the query (e.g. "Q${currentQuarter()} ${new Date().getFullYear()}") and set time_range to keep results recent; ` +
           "if the first results are from an older year than requested, search again with the explicit period before concluding the data does not exist. " +
           "Follow-ups inherit the prior topic. Cite web results with inline [n] markers only (no raw URLs)."
@@ -1653,6 +1820,19 @@ export async function runCloudNativeToolLoop(
   let lastModel: string | undefined;
   let lastCreditsRemaining: number | undefined;
   let lastAnnotations: FileAnnotation[] | undefined;
+  let payloadRepairs = 0;
+  let csvDumpRepairs = 0;
+
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+  const lastUserPrompt = lastUserMsg
+    ? flattenMessageContent(lastUserMsg.content as CloudChatMessage["content"])
+    : "";
+  const excelIntent = userAskedForSpreadsheetArtifact(lastUserPrompt);
+  const canGenerateSpreadsheet = tools.some(
+    (t) =>
+      t.function.name === "generate_spreadsheet" ||
+      t.function.name === "run_xlsx_python"
+  );
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -1688,7 +1868,153 @@ export async function runCloudNativeToolLoop(
       const toolCalls = decision.tool_calls ?? [];
 
       if (!toolCalls.length) {
-        if (decision.content.trim()) {
+        const content = decision.content.trim();
+        const isPlannerDump =
+          Boolean(content) && looksLikeMisplacedToolOrPlannerPayload(content);
+
+        if (
+          isPlannerDump &&
+          payloadRepairs < maxToolPayloadRepairs() &&
+          round + 1 < MAX_TOOL_ROUNDS
+        ) {
+          payloadRepairs += 1;
+          loopOpts.onToolStatus?.("Fixing tool call…");
+          messages = [
+            ...messages,
+            {
+              role: "assistant",
+              content: decision.content || null,
+              ...(decision.annotations?.length
+                ? { annotations: decision.annotations }
+                : {}),
+            },
+            {
+              role: "user",
+              content: toolCallRepairUserMessage("native"),
+            },
+          ];
+          continue;
+        }
+
+        // Still dumping facets after nudges — run the queries as web_search, never show JSON.
+        if (isPlannerDump && hasWebSearch && round + 1 < MAX_TOOL_ROUNDS) {
+          const queries = extractQueriesFromFacetDump(content);
+          if (queries.length > 0) {
+            loopOpts.onToolStatus?.(
+              queries.length > 1
+                ? `Searching the web (${queries.length} queries)…`
+                : `Searching the web for “${queries[0]}”…`
+            );
+            const syntheticCalls: CloudToolCall[] = queries.map((q, i) => ({
+              id: `facet-salvage-${round}-${i}`,
+              type: "function",
+              function: {
+                name: "web_search",
+                arguments: JSON.stringify({
+                  query: q,
+                  depth: "standard",
+                }),
+              },
+            }));
+            messages = [
+              ...messages,
+              {
+                role: "assistant",
+                content: null,
+                tool_calls: syntheticCalls,
+              },
+            ];
+            const batch = await executeToolCallsParallel(
+              syntheticCalls,
+              loopOpts,
+              webSearchResult
+            );
+            webSearchResult = batch.webSearchResult;
+            artifacts.push(...batch.artifacts);
+            messages = [
+              ...messages,
+              ...syntheticCalls.map((call, i) => ({
+                role: "tool" as const,
+                tool_call_id: call.id,
+                name: call.function.name,
+                content: batch.results[i]!.content,
+              })),
+              {
+                role: "user",
+                content:
+                  "Web research is done. Do not write any JSON. " +
+                  "Answer in prose with inline [n] citations, or call run_xlsx_python if the user asked for Excel.",
+              },
+            ];
+            continue;
+          }
+        }
+
+        if (isPlannerDump) {
+          // Never stream planner JSON to the chat bubble.
+          const fallback =
+            "I hit an internal research-plan format instead of searching. Please send the question again and I’ll retry with web_search.";
+          loopOpts.onChunk(fallback);
+          return {
+            content: fallback,
+            thinking,
+            webSearchResult,
+            artifacts,
+            model: lastModel,
+            creditsRemaining: lastCreditsRemaining,
+            fileAnnotations: lastAnnotations,
+          };
+        }
+
+        // Model pasted a CSV workbook into chat instead of generate_spreadsheet.
+        const csvDump =
+          content &&
+          excelIntent &&
+          canGenerateSpreadsheet &&
+          looksLikeCsvWorkbookDump(content);
+        if (csvDump && round + 1 < MAX_TOOL_ROUNDS && csvDumpRepairs < 1) {
+          csvDumpRepairs += 1;
+          loopOpts.onToolStatus?.("Fixing spreadsheet tool call…");
+          messages = [
+            ...messages,
+            {
+              role: "assistant",
+              content: decision.content || null,
+              ...(decision.annotations?.length
+                ? { annotations: decision.annotations }
+                : {}),
+            },
+            {
+              role: "user",
+              content: spreadsheetCsvDumpRepairUserMessage(),
+            },
+          ];
+          continue;
+        }
+        if (csvDump) {
+          const salvaged = await salvageCsvWorkbookDumpToArtifact(
+            content,
+            lastUserPrompt,
+            loopOpts
+          );
+          if (salvaged) {
+            artifacts.push(salvaged);
+            const note =
+              `Created a spreadsheet from the gathered figures (${salvaged.path.split(/[/\\]/).pop() ?? "workbook.xlsx"}).`;
+            loopOpts.onChunk(note);
+            return {
+              content: note,
+              thinking,
+              webSearchResult,
+              artifacts,
+              model: lastModel,
+              creditsRemaining: lastCreditsRemaining,
+              fileAnnotations: lastAnnotations,
+            };
+          }
+        }
+
+        if (content) {
           loopOpts.onChunk(decision.content);
         }
         return {
@@ -1763,7 +2089,7 @@ export async function runCloudNativeToolLoop(
       }
     }
 
-    // Final prose turn without tools
+    // Final prose turn without tools — buffer first so facet JSON never streams live.
     const finale = await new Promise<{
       content: string;
       model?: string;
@@ -1785,7 +2111,7 @@ export async function runCloudNativeToolLoop(
           generationOptions: loopOpts.generationOptions,
           onChunk: (chunk) => {
             content += chunk;
-            loopOpts.onChunk(chunk);
+            // Do not stream yet — may be a facet-plan dump.
           },
           onThinking: (t) => {
             thinking += t;
@@ -1810,8 +2136,22 @@ export async function runCloudNativeToolLoop(
       lastAnnotations = finale.annotations;
     }
 
+    let finaleContent = finale.content || lastContent;
+    if (
+      finaleContent &&
+      looksLikeMisplacedToolOrPlannerPayload(finaleContent)
+    ) {
+      // Never show planner JSON from the finale turn.
+      finaleContent =
+        "I gathered research context but almost returned an internal plan as the answer. " +
+        "Please ask again (or say “continue”) and I’ll answer in prose or call the spreadsheet tool.";
+    }
+    if (finaleContent) {
+      loopOpts.onChunk(finaleContent);
+    }
+
     return {
-      content: finale.content || lastContent,
+      content: finaleContent,
       thinking,
       webSearchResult,
       artifacts,

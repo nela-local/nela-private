@@ -93,13 +93,6 @@ impl IntentResolver {
             return Some(self.parse_explicit_intent(intent_key));
         }
 
-        // Active artifact edit — frontend passes the live preview path.
-        if let Some(path) = extra.get("artifact_path") {
-            if !path.is_empty() && matches_artifact_edit_trigger(prompt) {
-                return Some(IntentDecision::patch(path.clone()));
-            }
-        }
-
         let trimmed = prompt.trim();
 
         // Slash commands: /web /excel /ppt /html /rag /files (combinable at start)
@@ -325,69 +318,8 @@ fn matches_artifact_trigger_presentation(lower: &str) -> bool {
     has_presentation_noun && has_create_verb
 }
 
-fn matches_artifact_edit_trigger(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_lowercase();
-
-    // Plain Q&A / explain prompts must stay in chat even if a deck is open.
-    // ("explain how facebook changed the world" used to match substring "change".)
-    if is_information_seeking_prompt(&lower) {
-        return false;
-    }
-
-    if !has_edit_verb_word(&lower) {
-        return false;
-    }
-
-    let strong_create = lower.contains("from scratch")
-        || lower.contains("brand new")
-        || lower.contains("create a new")
-        || lower.contains("make a new")
-        || lower.contains("build a new")
-        || lower.contains("generate a new")
-        || lower.contains("new excel")
-        || lower.contains("new spreadsheet")
-        || lower.contains("new workbook")
-        || (lower.contains("create")
-            && (lower.contains("excel")
-                || lower.contains("spreadsheet")
-                || lower.contains("workbook")
-                || lower.contains("presentation")
-                || lower.contains("deck")
-                || lower.contains("html")));
-
-    let references_existing = references_existing_artifact(&lower);
-    let structural = is_structural_artifact_edit(&lower);
-
-    if strong_create && !references_existing {
-        return false;
-    }
-    // Create a new artifact even if the prompt says "in the sheet have…" —
-    // that is content instruction, not an edit of an open file.
-    if strong_create {
-        let explicit_edit = (lower.contains("edit ")
-            || lower.contains("modify ")
-            || lower.contains("update ")
-            || lower.contains("revise ")
-            || lower.contains("fix "))
-            && references_existing;
-        if !explicit_edit {
-            return false;
-        }
-    }
-
-    // With artifact_path present (caller), any clear edit verb is enough —
-    // prompt-bar is the primary edit path. Prefer structural/reference matches
-    // in logs via short-circuit order.
-    let _ = (references_existing, structural);
-    true
-}
-
 fn is_information_seeking_prompt(lower: &str) -> bool {
-    // Leading question / explain forms are chat, not deck edits.
+    // Leading question / explain forms are chat, not dashboard routing.
     let starters = [
         "explain ",
         "explain,",
@@ -416,78 +348,6 @@ fn is_information_seeking_prompt(lower: &str) -> bool {
     ];
     starters.iter().any(|s| lower.starts_with(s))
         || lower.starts_with("how ") && !lower.contains("slide") && !lower.contains("deck")
-}
-
-/// Word-boundary edit verbs — never match "changed" via substring "change".
-fn has_edit_verb_word(lower: &str) -> bool {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r"(?i)\b(edit|modify|update|change|revise|fix|adjust|tweak|improve|enhance|refine|rewrite|reformat|add|remove|delete|insert|replace|shorten|expand|polish|correct|amend|patch)\b",
-        )
-        .expect("edit verb regex")
-    });
-    re.is_match(lower)
-}
-
-fn references_existing_artifact(lower: &str) -> bool {
-    // Avoid bare "the sheet" / "the table" — common in create prompts
-    // ("In the sheet have the details…") and must not force edit routing.
-    lower.contains("this file")
-        || lower.contains("this deck")
-        || lower.contains("this slide")
-        || lower.contains("this spreadsheet")
-        || lower.contains("this sheet")
-        || lower.contains("this page")
-        || lower.contains("this html")
-        || lower.contains("this presentation")
-        || lower.contains("this ppt")
-        || lower.contains("this artifact")
-        || lower.contains("this excel")
-        || lower.contains("my deck")
-        || lower.contains("my spreadsheet")
-        || lower.contains("my presentation")
-        || lower.contains("my file")
-        || lower.contains("current artifact")
-        || lower.contains("current deck")
-        || lower.contains("current spreadsheet")
-        || lower.contains("above file")
-        || lower.contains("attached file")
-        || lower.contains("attached spreadsheet")
-        || lower.contains("open file")
-        || lower.contains("open deck")
-        || lower.contains("same file")
-        || lower.contains("same deck")
-        || lower.contains("existing deck")
-        || lower.contains("existing file")
-        || lower.contains("existing spreadsheet")
-        || lower.contains("existing presentation")
-        || lower.contains("the existing")
-        || lower.contains("the attached")
-        || lower.contains("the current")
-}
-
-fn is_structural_artifact_edit(lower: &str) -> bool {
-    // Clear deck/spreadsheet surgery without needing "this deck".
-    (lower.contains("slide")
-        && (lower.contains("add")
-            || lower.contains("remove")
-            || lower.contains("delete")
-            || lower.contains("insert")
-            || lower.contains("append")
-            || lower.contains("reorder")
-            || lower.contains("move")))
-        || lower.contains("change the theme")
-        || lower.contains("change theme")
-        || lower.contains("update the theme")
-        || lower.contains("change the title")
-        || lower.contains("rename the title")
-        || lower.contains("add a column")
-        || lower.contains("add column")
-        || lower.contains("delete column")
-        || lower.contains("remove column")
-        || lower.contains("add a row")
-        || lower.contains("add row")
 }
 
 fn extra_flag_true(extra: &HashMap<String, String>, key: &str) -> bool {
@@ -568,48 +428,6 @@ fn matches_artifact_trigger_html(lower: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn explain_changed_world_is_not_artifact_edit() {
-        assert!(!matches_artifact_edit_trigger(
-            "explain how facebook changed the world"
-        ));
-    }
-
-    #[test]
-    fn change_this_deck_theme_is_artifact_edit() {
-        assert!(matches_artifact_edit_trigger(
-            "change the theme on this deck to midnight"
-        ));
-    }
-
-    #[test]
-    fn add_slide_is_structural_edit() {
-        assert!(matches_artifact_edit_trigger(
-            "add a slide about privacy at the end"
-        ));
-    }
-
-    #[test]
-    fn create_new_excel_with_in_the_sheet_is_not_edit() {
-        let prompt = "I want you to design a 5 day trip and create a new excel sheet. \
-            In the sheet have the details of all the hotels. Add relevant links.";
-        assert!(!matches_artifact_edit_trigger(prompt));
-        assert!(matches_artifact_trigger_excel(&prompt.to_lowercase()));
-    }
-
-    #[test]
-    fn edit_this_spreadsheet_still_matches() {
-        assert!(matches_artifact_edit_trigger(
-            "edit this spreadsheet and add a Budget column"
-        ));
-    }
-
-    #[test]
-    fn substring_change_in_changed_is_not_edit_verb() {
-        assert!(!has_edit_verb_word("facebook changed the world"));
-        assert!(has_edit_verb_word("please change the title"));
-    }
 
     #[test]
     fn attached_spreadsheet_make_dashboard_is_html() {

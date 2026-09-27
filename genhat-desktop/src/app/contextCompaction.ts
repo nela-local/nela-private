@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   MediaAsset,
 } from "../types";
+import { stripLeakedToolPayloads } from "./send/toolCallRepair";
 
 export const CONTEXT_COMPACTION_THRESHOLD = 0.9;
 export const CONTEXT_COMPACTION_KEEP_RECENT = 8;
@@ -25,8 +26,21 @@ export function isDiscoveryNotice(content: string): boolean {
   );
 }
 
+/**
+ * Assistant turns are scrubbed of leaked planner JSON / tool markup so a bad
+ * earlier reply is never replayed as an example the model copies.
+ */
 export function toContextMessages(messages: ChatMessage[]): ChatContextMessage[] {
-  return messages.map(({ role, content }) => ({ role, content }));
+  const out: ChatContextMessage[] = [];
+  for (const { role, content } of messages) {
+    if (role !== "assistant") {
+      out.push({ role, content });
+      continue;
+    }
+    const cleaned = stripLeakedToolPayloads(content);
+    if (cleaned.trim()) out.push({ role, content: cleaned });
+  }
+  return out;
 }
 
 /**

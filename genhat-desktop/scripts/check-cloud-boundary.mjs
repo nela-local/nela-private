@@ -42,7 +42,6 @@ for (const path of roots) await scan(join(root, path));
 
 const localOnlyInferenceFiles = [
   "src/app/send/handleArtifactGeneration.ts",
-  "src/app/send/handleArtifactEdit.ts",
   "src/app/send/handleSendMindmap.ts",
   "src/components/PodcastTab.tsx",
   "src/hooks/usePipelineStore.ts",

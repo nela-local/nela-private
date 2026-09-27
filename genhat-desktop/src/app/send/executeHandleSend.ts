@@ -2,11 +2,7 @@ import { Api } from "../../api";
 import type { ChatMessage, DirectDocumentAttachment } from "../../types";
 import { parseSlashCommands, slashPromptForSend } from "../slashCommands";
 import { deriveTitleFromMessage } from "../sessionUtils";
-import {
-  findSessionArtifactPath,
-  isEditableArtifactPath,
-  matchesArtifactEditIntent,
-} from "../artifactEdit";
+import { findSessionArtifactPath } from "../artifactEdit";
 import { handleSendMindmap } from "./handleSendMindmap";
 import { handleSendDirectDocs } from "./handleSendDirectDocs";
 import { handleSendRag } from "./handleSendRag";
@@ -14,7 +10,6 @@ import { handleSendTts } from "./handleSendTts";
 import { handleSendVision } from "./handleSendVision";
 import { handleSendTextChat } from "./handleSendTextChat";
 import { handleArtifactGeneration } from "./handleArtifactGeneration";
-import { handleArtifactEdit } from "./handleArtifactEdit";
 import { friendlyErrorFromUnknown } from "../friendlyError";
 import type { SendHandlerContext } from "./types";
 import { buildSendHandlerContext } from "./buildContext";
@@ -137,10 +132,6 @@ export async function executeHandleSend(
       : {};
 
   const panelWasOpen = Boolean(session.artifactPanelOpen);
-  const previewSlideIndex =
-    typeof session.previewSlideIndex === "number" && session.previewSlideIndex >= 0
-      ? session.previewSlideIndex
-      : undefined;
   const livePreviewPath =
     findSessionArtifactPath(session) ??
     (session.artifactPath && session.artifactStage === "LivePreview"
@@ -154,7 +145,7 @@ export async function executeHandleSend(
       audioOutputs: prev.audioOutputs ?? [],
       cancelled: false,
       artifactStreamActive: false,
-      // Keep panel open when a LivePreview is already showing — edit may need it.
+      // Keep panel open when a LivePreview is already showing.
       artifactPanelOpen:
         panelWasOpen && Boolean(livePreviewPath) ? true : false,
       artifactPath: livePreviewPath ?? undefined,
@@ -234,47 +225,10 @@ export async function executeHandleSend(
 
   // ── Intent Resolution (Revamp P3/P5) ──────────────────────────────────────
   if (ctx.chatMode === "text") {
-    // Re-read session after the loading patch so panel/path stay accurate.
     const sessionNow =
       ctx.sessions.find((s) => s.id === sid) ?? session;
     const sessionArtifactPath =
       findSessionArtifactPath(sessionNow) ?? livePreviewPath;
-    const attachedEditable = promptDocumentPaths.filter(isEditableArtifactPath);
-    const editTargetPath =
-      attachedEditable[0] ??
-      (panelWasOpen && sessionNow.artifactPath
-        ? sessionNow.artifactPath
-        : null) ??
-      sessionArtifactPath ??
-      null;
-
-    const editOptions = {
-      attachedPaths: promptDocumentPaths,
-      activeSlideIndex: previewSlideIndex,
-      keepPanelOpen: panelWasOpen || Boolean(editTargetPath),
-    };
-
-    if (
-      matchesArtifactEditIntent(promptText, {
-        artifactPath: editTargetPath,
-        attachedPaths: promptDocumentPaths,
-        panelOpen: panelWasOpen,
-      })
-    ) {
-      if (isPrivateMode()) {
-        finishPrivateModeArtifactRefusal(sid, ctx);
-        return;
-      }
-      await handleArtifactEdit(
-        promptText,
-        editTargetPath ?? "",
-        sid,
-        ctx,
-        ctrl,
-        editOptions
-      );
-      return;
-    }
 
     const spreadsheetAttached = hasSpreadsheetAttach(promptDocumentPaths);
     const artifactCtx = {
@@ -323,22 +277,6 @@ export async function executeHandleSend(
           artifactCtx,
           ctrl,
           artifactOptions
-        );
-        return;
-      }
-      if (intent.kind.kind === "Patch") {
-        if (isPrivateMode()) {
-          finishPrivateModeArtifactRefusal(sid, ctx);
-          return;
-        }
-        const { artifact_path } = intent.kind;
-        await handleArtifactEdit(
-          promptText,
-          artifact_path || sessionArtifactPath || "",
-          sid,
-          ctx,
-          ctrl,
-          editOptions
         );
         return;
       }

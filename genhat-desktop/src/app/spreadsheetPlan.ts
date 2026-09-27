@@ -106,7 +106,7 @@ export const SPREADSHEET_SCHEMA_STATIC = `You are a professional assistant that 
 You must return ONLY a JSON object conforming to the schema contract. Do NOT include markdown formatting, code fences (e.g. \`\`\`json), or thinking/explanations.
 
 Preferred multi-sheet contract (USE THIS whenever the topic has distinct tables):
-{"sheets":[{"name":"ShortTab","headers":["col1","col2"],"rows":[["v1","v2"],...]},{"name":"AnotherTab","headers":[...],"rows":[...]}],"output_name":"optional_filename_without_extension"}
+{"sheets":[{"name":"ShortTab","headers":["col1","col2"],"rows":[["v1","=B2-C2"],...],"cell_fills":{"0:0":"#1F3864","A1":"#1F3864","1:1":"#E8F5E9"},"cell_fonts":{"0:0":"#FFFFFF","B2":"#0000FF"}},{"name":"Legend","headers":["Element","Meaning"],"rows":[["Navy header","Column titles"],["Blue font","Hardcoded inputs"]]}],"output_name":"optional_filename_without_extension"}
 
 Legacy single-sheet contract (only when one table is enough):
 {"ops": [{"op": "SUM_COLUMN" | "AVERAGE_BY_GROUP" | "PIVOT" | "SORT_DESC" | "SORT_ASC" | "FILTER_ROWS" | "COUNT_BY_GROUP" | "ADD_COLUMN" | "RENAME_SHEET" | "WRITE_DATA" | "ADD_CHART", ...}], "output_name": "optional_filename_without_extension"}
@@ -124,6 +124,13 @@ Allowed Operations (inside a sheet's "ops", or top-level "ops" for single-sheet)
 - WRITE_DATA: { "headers": ["col1", "col2"], "rows": [["v1", "v2"], ...] }
 - ADD_CHART: { "chart_type": "column"|"bar"|"line"|"pie", "category_col": "col_name", "value_col": "optional_numeric_col", "title": "optional" }
   — embeds a native Excel chart. Omit value_col to count unique category values. Use for dashboards / analysis visuals.
+
+Color coding / presentation:
+- Prefer the sheets[] contract. Use cell_fills + cell_fonts for analyst-quality workbooks.
+- Keys: "row:col" (0-based, header = row 0) or Excel A1. Colors: #RRGGBB or rgb().
+- Palette: #1F3864 navy headers, #8EA9DB sections, #E8F5E9 gains, #FFEBEE losses; blue font #0000FF for inputs.
+- Formula cells: strings starting with "=". Add a Legend sheet when color-coding.
+- When present, fills/fonts are written into real .xlsx and survive Excel / LibreOffice.
 
 Output rules:
 - Include "output_name" (no extension) describing the spreadsheet topic.
@@ -268,7 +275,344 @@ function asStringArray(value: unknown): string[] {
 
 function asStringMatrix(value: unknown): string[][] {
   if (!Array.isArray(value)) return [];
-  return value.map((row) => asStringArray(row));
+  return value.map((row) => {
+    // Model sometimes emits a CSV line string instead of a cell array.
+    if (typeof row === "string") {
+      return splitCsvAwareLine(row);
+    }
+    return asStringArray(row);
+  });
+}
+
+/** Minimal CSV line split that respects double quotes. */
+function splitCsvAwareLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      inQuotes = !inQuotes;
+    } else if (c === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += c;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+/**
+ * Rejoin cells incorrectly split on thousands separators
+ * (e.g. "$21","300" → "$21,300") when the row is wider than the header.
+ */
+export function repairMisalignedRow(
+  headers: string[],
+  row: string[]
+): string[] {
+  const width = headers.length;
+  if (width <= 0) return row;
+  let cells = [...row];
+  let guard = 0;
+  while (cells.length > width && guard++ < 64) {
+    let merged = false;
+    for (let i = 0; i < cells.length - 1; i++) {
+      const a = cells[i] ?? "";
+      const b = cells[i + 1] ?? "";
+      if (looksLikeThousandSplit(a, b)) {
+        cells.splice(i, 2, `${a},${b}`);
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) break;
+  }
+  while (cells.length < width) cells.push("");
+  return cells.slice(0, width);
+}
+
+function looksLikeThousandSplit(left: string, right: string): boolean {
+  const a = left.trim();
+  const b = right.trim();
+  // "$21" + "300" / "21" + "300" / "$(1" + "234)" style fragments
+  if (!/^\(?\$?-?\d{1,3}$/.test(a)) return false;
+  if (!/^\d{3}(\.\d+)?%?\)?$/.test(b)) return false;
+  return true;
+}
+
+/** Align every data row to header width, repairing comma-split money values. */
+export function alignSheetRows(
+  headers: string[],
+  rows: string[][]
+): string[][] {
+  const width = headers.length;
+  if (width <= 0) return rows;
+  return rows
+    .map((row) => repairMisalignedRow(headers, row))
+    .filter((row) => row.some((cell) => cell.trim().length > 0));
+}
+
+/**
+ * True when a sheet looks like chat prose / markdown dumped into cells
+ * (e.g. "Based on the official…", "- **Net Revenues**: …") rather than a table.
+ */
+export function isNarrativeJunkSheet(
+  name: string,
+  headers: string[],
+  rows: string[][]
+): boolean {
+  const samples: string[] = [
+    ...headers.map((h) => String(h ?? "")),
+    ...rows.flatMap((r) => r.map((c) => String(c ?? ""))),
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (samples.length === 0) return true;
+
+  const proseHits = samples.filter((s) =>
+    /^(based on|here are|now creating|i('ll| will)|sure[,!]?\s|below is|- \*\*|^\*\*)/i.test(
+      s
+    ) ||
+    /\[[0-9]+\]/.test(s) || // citation markers in a "header"
+    (s.length > 80 && /\b(earnings|confirmed figures|spreadsheet)\b/i.test(s))
+  ).length;
+
+  const shortHeaders = headers.filter((h) => {
+    const t = String(h ?? "").trim();
+    return t.length > 0 && t.length <= 40 && !/\s{2,}/.test(t);
+  });
+  const looksLikeMarkdownList =
+    rows.filter((r) => /^[-*•]\s/.test(String(r[0] ?? "").trim())).length >=
+    Math.max(2, Math.floor(rows.length * 0.5));
+
+  // Generic Sheet1/SheetN with mostly prose, or any sheet that is mostly bullets.
+  const genericName = /^sheet\s*\d*$/i.test(name.trim());
+  if (looksLikeMarkdownList) return true;
+  if (genericName && proseHits >= 2) return true;
+  if (proseHits >= 3 && shortHeaders.length <= 1) return true;
+  // Header row itself is a sentence.
+  if (
+    headers.length <= 2 &&
+    headers.some((h) => String(h).trim().length > 60)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Sanitize sparse cell color maps from model / tool JSON.
+ * Accepts `"row:col"`, `"row,col"`, or Excel `"A1"` keys → `#RRGGBB`.
+ * Colors: `#RGB`, `#RRGGBB`, `RRGGBB`, or `rgb(r,g,b)`.
+ */
+export function sanitizeCellFills(
+  raw: unknown
+): Record<string, string> | undefined {
+  return sanitizeColorMap(raw);
+}
+
+/** Same key/color rules as cell_fills — used for font colors. */
+export function sanitizeCellFonts(
+  raw: unknown
+): Record<string, string> | undefined {
+  return sanitizeColorMap(raw);
+}
+
+function sanitizeColorMap(
+  raw: unknown
+): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const hex = parseFlexibleColor(v);
+    if (!hex) continue;
+    const key = normalizeCellKey(k);
+    if (key) out[key] = hex;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Normalize a color string to `#RRGGBB` or null. */
+export function parseFlexibleColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const t = value.trim();
+  if (!t) return null;
+  const rgb = t.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+  if (rgb) {
+    const r = Math.min(255, Number(rgb[1]));
+    const g = Math.min(255, Number(rgb[2]));
+    const b = Math.min(255, Number(rgb[3]));
+    if (![r, g, b].every((n) => Number.isFinite(n))) return null;
+    return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  }
+  const hexMatch = t.match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (!hexMatch) return null;
+  let h = hexMatch[1]!.toUpperCase();
+  if (h.length === 3) {
+    h = h
+      .split("")
+      .map((c) => c + c)
+      .join("");
+  }
+  return `#${h}`;
+}
+
+function normalizeCellKey(raw: string): string | null {
+  const key = raw.trim();
+  if (/^\d+:\d+$/.test(key)) return key;
+  const comma = key.match(/^(\d+)\s*[,;]\s*(\d+)$/);
+  if (comma) return `${comma[1]}:${comma[2]}`;
+  const a1 = excelA1ToRowCol(key);
+  if (a1) return `${a1.r}:${a1.c}`;
+  return null;
+}
+
+/** Excel A1 → 0-based row/col. */
+export function excelA1ToRowCol(
+  ref: string
+): { r: number; c: number } | null {
+  const m = ref.trim().match(/^([A-Za-z]+)(\d+)$/);
+  if (!m) return null;
+  let col = 0;
+  for (const ch of m[1]!.toUpperCase()) {
+    col = col * 26 + (ch.charCodeAt(0) - 64);
+  }
+  const r = parseInt(m[2]!, 10) - 1;
+  const c = col - 1;
+  if (!Number.isFinite(r) || !Number.isFinite(c) || r < 0 || c < 0) return null;
+  return { r, c };
+}
+
+/** True when the user asked for color coding / highlights on a spreadsheet. */
+export function wantsSpreadsheetColorCoding(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return (
+    /\bcolou?r[\s-]?cod(?:e|ed|ing)?\b/i.test(t) ||
+    /\b(conditional\s*format|heat\s*map|traffic\s*light)\b/i.test(t) ||
+    /\b(with|add|use|apply|proper|nice|professional)\b[\s\S]{0,48}\bcolou?rs?\b/i.test(
+      t
+    ) ||
+    /\bcolou?rs?\b[\s\S]{0,48}\b(code|coded|coding|highlight|sheet|excel|cells?|legend)\b/i.test(
+      t
+    ) ||
+    /\bhighlight\b[\s\S]{0,40}\b(cells?|rows?|gains?|losses?|metrics?)\b/i.test(
+      t
+    ) ||
+    /\blegend\b[\s\S]{0,40}\b(sheet|excel|color|colour)\b/i.test(t)
+  );
+}
+
+function looksNegativeMetric(cell: string): boolean {
+  const t = cell.trim();
+  if (!t) return false;
+  if (/^\(.*\)$/.test(t)) return true;
+  if (/^-\s*[\d$€£¥%]/.test(t)) return true;
+  if (/-\d/.test(t) && /%|bps|yoy|growth/i.test(t)) return true;
+  return false;
+}
+
+function looksPositiveMetric(cell: string): boolean {
+  const t = cell.trim();
+  if (!t || looksNegativeMetric(t)) return false;
+  if (/^\+\s*[\d$€£¥%]/.test(t)) return true;
+  if (/\+\d/.test(t) && /%|bps|yoy|growth/i.test(t)) return true;
+  if (/^(up|gain|beat|record|strong)\b/i.test(t)) return true;
+  return false;
+}
+
+function looksSectionLabel(row: string[], width: number): boolean {
+  const label = String(row[0] ?? "").trim();
+  if (!label || label.length > 48) return false;
+  // Section bands are label-only rows (no figures in other columns).
+  let hasOtherContent = false;
+  for (let c = 1; c < width; c++) {
+    if (String(row[c] ?? "").trim()) {
+      hasOtherContent = true;
+      break;
+    }
+  }
+  if (hasOtherContent) return false;
+  if (
+    /^(revenues?|expenses?|income|assets|liabilities|capital|segments?|notes?|totals?)\b/i.test(
+      label
+    )
+  ) {
+    return true;
+  }
+  return /:$/.test(label) || /^(net |total |operating )/i.test(label);
+}
+
+/**
+ * Host-side presentable fills when the model omitted cell_fills but the user
+ * asked for color coding. Navy header band + section tint + +/- heuristics.
+ */
+export function buildAutoCellFills(
+  headers: string[],
+  rows: string[][]
+): Record<string, string> {
+  const fills: Record<string, string> = {};
+  const width = Math.max(
+    headers.length,
+    ...rows.map((r) => r.length),
+    0
+  );
+  for (let c = 0; c < width; c++) {
+    fills[`0:${c}`] = "#1F3864";
+  }
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    const zebra = r % 2 === 1;
+    const section = looksSectionLabel(row, width);
+    for (let c = 0; c < width; c++) {
+      const key = `${r + 1}:${c}`;
+      const cell = String(row[c] ?? "");
+      if (section) fills[key] = "#8EA9DB";
+      else if (looksNegativeMetric(cell)) fills[key] = "#FFEBEE";
+      else if (looksPositiveMetric(cell)) fills[key] = "#E8F5E9";
+      else if (zebra) fills[key] = "#F2F2F2";
+    }
+  }
+  return fills;
+}
+
+/** White text on navy/section header bands when auto-filling. */
+export function buildAutoCellFonts(
+  headers: string[],
+  rows: string[][],
+  fills: Record<string, string>
+): Record<string, string> {
+  const fonts: Record<string, string> = {};
+  const width = Math.max(
+    headers.length,
+    ...rows.map((r) => r.length),
+    0
+  );
+  for (let c = 0; c < width; c++) {
+    const key = `0:${c}`;
+    if (fills[key]) fonts[key] = "#FFFFFF";
+  }
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < width; c++) {
+      const key = `${r + 1}:${c}`;
+      const fill = fills[key];
+      if (fill === "#8EA9DB" || fill === "#1F3864") fonts[key] = "#FFFFFF";
+      else {
+        const cell = String(rows[r]?.[c] ?? "").trim();
+        // Hardcoded numeric inputs (not formulas) → blue font.
+        if (
+          cell &&
+          !cell.startsWith("=") &&
+          c > 0 &&
+          /^-?[\d,.$€£¥]+(\.\d+)?%?$/.test(cell.replace(/[()\s]/g, ""))
+        ) {
+          fonts[key] = "#0000FF";
+        }
+      }
+    }
+  }
+  return fonts;
 }
 
 function normalizeOp(raw: Record<string, unknown>): SpreadsheetOp | null {
@@ -342,7 +686,13 @@ function normalizeOp(raw: Record<string, unknown>): SpreadsheetOp | null {
 /** Normalize and validate a spreadsheet plan before sending to the Excel sidecar. */
 export function normalizeSpreadsheetPlan(
   plan: Record<string, unknown>,
-  options: { prompt: string; hasSourceData: boolean; expectedRowCount?: number | null }
+  options: {
+    prompt: string;
+    hasSourceData: boolean;
+    expectedRowCount?: number | null;
+    /** When true (or when prompt asks for color coding), fill missing cell_fills. */
+    ensureColorFills?: boolean;
+  }
 ): SpreadsheetPlan {
   const output_name = deriveArtifactFilename({
     llmName:
@@ -352,6 +702,9 @@ export function normalizeSpreadsheetPlan(
     topic: options.prompt,
     fallback: "spreadsheet",
   });
+  const ensureColorFills =
+    options.ensureColorFills === true ||
+    wantsSpreadsheetColorCoding(options.prompt);
 
   // Preferred path: explicit sheets[] (cloud tool / multi-CSV / JSON multi-sheet).
   const rawSheets = Array.isArray(plan.sheets) ? plan.sheets : [];
@@ -364,8 +717,10 @@ export function normalizeSpreadsheetPlan(
       const name = sanitizeExcelSheetName(
         String(raw.name ?? raw.title ?? `Sheet${i + 1}`)
       );
-      const headers = asStringArray(raw.headers);
-      const rows = asStringMatrix(raw.rows ?? raw.source_rows);
+      let headers = asStringArray(raw.headers);
+      let cleanRows = asStringMatrix(raw.rows ?? raw.source_rows);
+      let cell_fills = sanitizeCellFills(raw.cell_fills ?? raw.cellFills);
+      let cell_fonts = sanitizeCellFonts(raw.cell_fonts ?? raw.cellFonts);
       let ops: SpreadsheetOp[] = Array.isArray(raw.ops)
         ? raw.ops
             .map((op) =>
@@ -376,44 +731,59 @@ export function normalizeSpreadsheetPlan(
             .filter((op): op is SpreadsheetOp => op !== null)
         : [];
 
-      if (!options.hasSourceData) {
-        const hasWrite = ops.some((op) => op.op === "WRITE_DATA");
-        if (!hasWrite && headers.length > 0) {
-          const width = headers.length;
-          const cleanRows = rows
-            .map((row) => {
-              const padded = [...row];
-              while (padded.length < width) padded.push("");
-              return padded.slice(0, width);
-            })
-            .filter((row) => row.some((cell) => cell.trim().length > 0));
-          ops = [
-            { op: "WRITE_DATA", headers, rows: cleanRows },
-            ...ops,
-          ];
-        } else {
-          for (const op of ops) {
-            if (op.op !== "WRITE_DATA") continue;
-            const width = op.headers.length;
-            op.rows = op.rows
-              .map((row) => {
-                const padded = [...row];
-                while (padded.length < width) padded.push("");
-                return padded.slice(0, width);
-              })
-              .filter((row) => row.some((cell) => cell.trim().length > 0));
+      const width = headers.length;
+      if (width > 0) {
+        cleanRows = alignSheetRows(headers, cleanRows);
+      }
+
+      // Pull table out of WRITE_DATA when we need host-side fills.
+      if (
+        (!headers.length || ensureColorFills) &&
+        ops.some((op) => op.op === "WRITE_DATA")
+      ) {
+        const write = ops.find((op) => op.op === "WRITE_DATA");
+        if (write && write.op === "WRITE_DATA") {
+          if (!headers.length) headers = write.headers;
+          if (!cleanRows.length || ensureColorFills) {
+            cleanRows = alignSheetRows(
+              headers.length ? headers : write.headers,
+              write.rows
+            );
           }
         }
       }
 
+      if (!options.hasSourceData) {
+        const hasWrite = ops.some((op) => op.op === "WRITE_DATA");
+        // Prefer bare headers/rows (preserves fills/fonts/formulas) over WRITE_DATA.
+        if (hasWrite) {
+          for (const op of ops) {
+            if (op.op !== "WRITE_DATA") continue;
+            op.rows = alignSheetRows(op.headers, op.rows);
+          }
+        }
+      }
+
+      if (ensureColorFills && !cell_fills && headers.length > 0) {
+        cell_fills = buildAutoCellFills(headers, cleanRows);
+      }
+      if (ensureColorFills && cell_fills && !cell_fonts && headers.length > 0) {
+        cell_fonts = buildAutoCellFonts(headers, cleanRows, cell_fills);
+      }
+
       if (ops.length === 0 && headers.length === 0) continue;
-      const hasWrite = ops.some((op) => op.op === "WRITE_DATA");
+      if (isNarrativeJunkSheet(name, headers, cleanRows)) continue;
+      // Bare table whenever headers exist so rust_xlsxwriter applies styles once.
+      const useBareTable = headers.length > 0;
+      const sheetOps = useBareTable
+        ? ops.filter((op) => op.op !== "WRITE_DATA")
+        : ops;
       sheets.push({
         name,
-        // Prefer WRITE_DATA ops for the table; only pass bare headers/rows when no WRITE_DATA.
-        ...(!hasWrite && headers.length ? { headers } : {}),
-        ...(!hasWrite && rows.length ? { rows } : {}),
-        ops,
+        ...(useBareTable ? { headers, rows: cleanRows } : {}),
+        ...(cell_fills ? { cell_fills } : {}),
+        ...(cell_fonts ? { cell_fonts } : {}),
+        ops: sheetOps,
       });
     }
 
@@ -453,14 +823,7 @@ export function normalizeSpreadsheetPlan(
   if (!options.hasSourceData) {
     const writeOp = ops.find((op) => op.op === "WRITE_DATA");
     if (writeOp && writeOp.op === "WRITE_DATA") {
-      const width = writeOp.headers.length;
-      writeOp.rows = writeOp.rows
-        .map((row) => {
-          const padded = [...row];
-          while (padded.length < width) padded.push("");
-          return padded.slice(0, width);
-        })
-        .filter((row) => row.some((cell) => cell.trim().length > 0));
+      writeOp.rows = alignSheetRows(writeOp.headers, writeOp.rows);
 
       const expected = options.expectedRowCount;
       if (expected && expected > 0 && writeOp.rows.length < expected) {

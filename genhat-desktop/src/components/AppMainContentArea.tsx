@@ -13,8 +13,6 @@ import { lazy, Suspense } from "react";
 import { useSessionStore } from "../stores/sessionStore";
 import { useArtifactStreamStore } from "../stores/artifactStreamStore";
 import { useUIStore } from "../stores/uiStore";
-import { handlePreviewArtifactEdit } from "../app/sessionSendActions";
-
 const PdfViewer = lazy(() => import("./PdfViewer"));
 const DocumentViewer = lazy(() => import("./DocumentViewer"));
 const PlaygroundMode = lazy(() => import("./PlaygroundMode"));
@@ -270,9 +268,6 @@ export default function AppMainContentArea({
               !activeSession.artifactPath
             }
             onClose={closeArtifactPanel}
-            onPreviewEdit={(text, path, onStatus, editContext) =>
-              handlePreviewArtifactEdit(text, path, onStatus, editContext)
-            }
           />
         </div>
       )}

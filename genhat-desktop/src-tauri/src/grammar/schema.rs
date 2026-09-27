@@ -112,6 +112,14 @@ pub struct SpreadsheetSheet {
     /// Optional per-sheet ops (WRITE_DATA, ADD_CHART, …).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ops: Vec<SpreadsheetOp>,
+
+    /// Sparse cell fills keyed `"row:col"` (0-based, including header row 0) → `#RRGGBB`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_fills: Option<std::collections::HashMap<String, String>>,
+
+    /// Sparse font colors keyed like `cell_fills` → `#RRGGBB` (e.g. blue inputs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_fonts: Option<std::collections::HashMap<String, String>>,
 }
 
 /// A complete spreadsheet synthesis plan emitted by the SLM.

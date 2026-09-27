@@ -33,7 +33,7 @@ export function handleCancel(): void {
 
   abortControllers.get(sid)?.abort();
   abortControllers.delete(sid);
-  // Unblock any await openImagePicker() so the edit pipeline can finish.
+  // Unblock any await openImagePicker() so panel micro-edits can finish.
   void import("../stores/imagePickerStore").then(({ cancelImagePicker }) =>
     cancelImagePicker()
   );
@@ -121,56 +121,6 @@ export async function handleRetryPrompt(assistantMsgIndex: number): Promise<void
   await executeHandleSend(retryText, undefined, {
     reuseExistingUserMessage: true,
   });
-}
-
-/**
- * Edit the open artifact from the preview panel chat.
- * Does not close the panel or route through main chat intent resolution.
- */
-export async function handlePreviewArtifactEdit(
-  text: string,
-  artifactPath: string,
-  onStatus?: (message: string, kind: "progress" | "done" | "error") => void,
-  editContext?: { activeSlideIndex?: number }
-): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed || !artifactPath) return;
-
-  const sessionStore = useSessionStore.getState();
-  const sid = sessionStore.activeSessionId;
-  if (!sid) return;
-
-  const session = sessionStore.sessions.find((s) => s.id === sid);
-  if (!session) {
-    onStatus?.("No active chat session. Open a chat, then try again.", "error");
-    return;
-  }
-  if (session.loading) {
-    onStatus?.(
-      "Another request is still running. Wait for it to finish, then try again.",
-      "error"
-    );
-    return;
-  }
-
-  const { buildSendHandlerContext } = await import("./send/buildContext");
-  const { handleArtifactEdit } = await import("./send/handleArtifactEdit");
-  const ctx = buildSendHandlerContext();
-  const ctrl = new AbortController();
-  abortControllers.set(sid, ctrl);
-
-  try {
-    await handleArtifactEdit(trimmed, artifactPath, sid, ctx, ctrl, {
-      previewMode: true,
-      onStatus,
-      activeSlideIndex: editContext?.activeSlideIndex,
-    });
-  } catch (err: unknown) {
-    const { friendlyErrorFromUnknown } = await import("./friendlyError");
-    onStatus?.(friendlyErrorFromUnknown(err), "error");
-  } finally {
-    abortControllers.delete(sid);
-  }
 }
 
 export function handleModeSwitch(mode: ChatMode): void {

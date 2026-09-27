@@ -1362,41 +1362,22 @@ export const Api = {
     return invoke<ArtifactResult>("generate_spreadsheet", { plan });
   },
 
+  /** Run constrained openpyxl Python to create a rich .xlsx. */
+  async runXlsxPython(
+    code: string,
+    outputName?: string
+  ): Promise<ArtifactResult> {
+    return invoke<ArtifactResult>("run_xlsx_python", {
+      code,
+      outputName: outputName ?? null,
+    });
+  },
+
   /** Generate presentation artifact (rendered in-process). */
   async generatePresentation(
     plan: PresentationPlan | Record<string, unknown>
   ): Promise<ArtifactResult> {
     return invoke<ArtifactResult>("generate_presentation", { plan });
-  },
-
-  /** Parse a NELA HTML slide deck into slides + theme. */
-  async parsePresentationDeck(path: string): Promise<{
-    theme: string | null;
-    slides: Record<string, unknown>[];
-    slideCount: number;
-    isNelaDeck: boolean;
-  }> {
-    return invoke("parse_presentation_deck", { request: { path } });
-  },
-
-  /** Append slides or replace a NELA HTML deck (parse → edit → re-render). */
-  async editPresentationDeck(request: {
-    path: string;
-    appendSlides?: Record<string, unknown>[];
-    insertAt?: number;
-    replacementPlan?: Record<string, unknown>;
-    outputName?: string;
-  }): Promise<ArtifactResult> {
-    return invoke<ArtifactResult>("edit_presentation_deck", { request });
-  },
-
-  /** Apply surgical presentation ops (theme/font/color/slide insert-patch-remove). */
-  async applyPresentationOps(request: {
-    path: string;
-    ops: Record<string, unknown>[];
-    outputName?: string;
-  }): Promise<ArtifactResult> {
-    return invoke<ArtifactResult>("apply_presentation_ops", { request });
   },
 
   /** Generate HTML artifact using the HTML sidecar. */
@@ -1411,14 +1392,26 @@ export const Api = {
   ): Promise<{
     sheet_name: string;
     rows: string[][];
+    cell_fills?: Record<string, string>;
     truncated?: boolean;
-    sheets?: Array<{ sheet_name: string; rows: string[][]; truncated?: boolean }>;
+    sheets?: Array<{
+      sheet_name: string;
+      rows: string[][];
+      cell_fills?: Record<string, string>;
+      truncated?: boolean;
+    }>;
   }> {
     return invoke<{
       sheet_name: string;
       rows: string[][];
+      cell_fills?: Record<string, string>;
       truncated?: boolean;
-      sheets?: Array<{ sheet_name: string; rows: string[][]; truncated?: boolean }>;
+      sheets?: Array<{
+        sheet_name: string;
+        rows: string[][];
+        cell_fills?: Record<string, string>;
+        truncated?: boolean;
+      }>;
     }>("parse_spreadsheet_data", {
       path,
       maxRows: maxRows ?? null,
@@ -1452,14 +1445,6 @@ export const Api = {
     maxImages?: number
   ): Promise<ArtifactImageAsset[]> {
     return invoke<ArtifactImageAsset[]>("extract_document_images", { path, maxImages });
-  },
-
-  /**
-   * Apply a unified diff patch, writing a **new** artifact file.
-   * The original path is preserved. Returns the new file path.
-   */
-  async applyDiffPatch(path: string, patch: string): Promise<string> {
-    return invoke<string>("apply_diff_patch", { path, patch });
   },
 
   /**

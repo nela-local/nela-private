@@ -7,7 +7,7 @@ use crate::mcp::types::PipelineStage;
 use crate::grammar::schema::HtmlPlan;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DTOs
@@ -27,6 +27,10 @@ pub struct ArtifactResult {
     pub path: String,
     pub kind: String,
     pub warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula_errors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recalculated: Option<bool>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +78,129 @@ pub async fn generate_spreadsheet(
         path: path.to_string_lossy().to_string(),
         kind: "xlsx".to_string(),
         warning,
+        formula_errors: None,
+        recalculated: None,
+    })
+}
+
+/// Run constrained openpyxl Python to create a rich .xlsx.
+/// Prefers NELA Cloud (`/v1/xlsx/python`: openpyxl + LibreOffice recalc + formula scan);
+/// falls back to local Python (+ optional local soffice) when cloud is unavailable.
+#[tauri::command]
+pub async fn run_xlsx_python(
+    code: String,
+    output_name: Option<String>,
+    app: AppHandle,
+) -> Result<ArtifactResult, String> {
+    emit_stage(&app, PipelineStage::WritingCode);
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+
+    // Prefer backend pipeline (generation + LibreOffice verify gate).
+    let cloud_body = serde_json::json!({
+        "code": code,
+        "outputName": output_name,
+    });
+    let cloud_result = crate::cloud::client::run_xlsx_python(&app_data_dir, cloud_body).await;
+
+    let result = match cloud_result {
+        Ok(value) => {
+            let b64 = value
+                .get("xlsxBase64")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Cloud Excel reply missing xlsxBase64".to_string())?;
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| format!("decode workbook: {e}"))?;
+            let formula_errors: Vec<String> = value
+                .get("formulaErrors")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let recalculated = value
+                .get("recalculated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let warnings: Vec<String> = value
+                .get("warnings")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let stem = value
+                .get("outputName")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or(output_name.clone());
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::spreadsheet::save_xlsx_bytes(
+                    &bytes,
+                    stem.as_deref(),
+                    formula_errors,
+                    recalculated,
+                    &warnings,
+                )
+            })
+            .await
+            .map_err(|e| format!("xlsx save task failed: {e}"))??
+        }
+        Err(cloud_err) => {
+            // Only fall back when Cloud is unreachable / unsigned / endpoint missing.
+            // Surface script validation and formula-pipeline errors to the model.
+            let lower = cloud_err.to_lowercase();
+            let use_local = lower.contains("couldn't reach")
+                || lower.contains("sign in")
+                || lower.contains("session expired")
+                || lower.contains("busy right now")
+                || lower.contains("couldn't find")
+                || lower.contains("unexpected reply");
+            if !use_local {
+                return Err(cloud_err);
+            }
+            let code_local = code.clone();
+            let name_local = output_name.clone();
+            let mut local = tauri::async_runtime::spawn_blocking(move || {
+                crate::spreadsheet::run_xlsx_python_script(&code_local, name_local.as_deref())
+            })
+            .await
+            .map_err(|e| format!("xlsx python task failed: {e}"))??;
+            let note = format!("Cloud Excel unavailable ({cloud_err}); used local sandbox.");
+            local.warning = Some(match local.warning.take() {
+                Some(w) => format!("{note}\n{w}"),
+                None => note,
+            });
+            local
+        }
+    };
+
+    emit_stage(
+        &app,
+        PipelineStage::LivePreview {
+            path: result.path.to_string_lossy().to_string(),
+        },
+    );
+
+    Ok(ArtifactResult {
+        path: result.path.to_string_lossy().to_string(),
+        kind: "xlsx".to_string(),
+        warning: result.warning,
+        formula_errors: if result.formula_errors.is_empty() {
+            None
+        } else {
+            Some(result.formula_errors)
+        },
+        recalculated: Some(result.recalculated),
     })
 }
 
@@ -109,152 +236,8 @@ pub async fn generate_presentation(
         path: path.to_string_lossy().to_string(),
         kind: "html".to_string(),
         warning: None,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParsePresentationDeckRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParsedPresentationDeck {
-    pub theme: Option<String>,
-    pub slides: Vec<serde_json::Value>,
-    pub slide_count: usize,
-    pub is_nela_deck: bool,
-}
-
-/// Parse a NELA HTML slide deck (or native PPTX) into a compact plan (for edit flows).
-#[tauri::command]
-pub fn parse_presentation_deck(
-    request: ParsePresentationDeckRequest,
-) -> Result<ParsedPresentationDeck, String> {
-    let lower = request.path.to_ascii_lowercase();
-    let is_pptx = lower.ends_with(".pptx") || lower.ends_with(".ppt");
-    let plan = crate::presentation::load_presentation_plan(&request.path)?;
-    let is_nela_deck = if is_pptx {
-        false
-    } else {
-        let html = std::fs::read_to_string(&request.path)
-            .map_err(|e| format!("Failed to read presentation: {e}"))?;
-        crate::presentation::is_nela_presentation_html(&html)
-    };
-    let slides: Vec<serde_json::Value> = plan
-        .slides
-        .iter()
-        .map(serde_json::to_value)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to serialize slides: {e}"))?;
-    let slide_count = slides.len();
-    Ok(ParsedPresentationDeck {
-        theme: plan.theme,
-        slides,
-        slide_count,
-        is_nela_deck,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditPresentationDeckRequest {
-    pub path: String,
-    #[serde(default)]
-    pub append_slides: Vec<crate::grammar::schema::PresentationSlide>,
-    /// Zero-based index to insert new slides. When omitted, slides append at the end.
-    #[serde(default)]
-    pub insert_at: Option<usize>,
-    #[serde(default)]
-    pub replacement_plan: Option<serde_json::Value>,
-    #[serde(default)]
-    pub output_name: Option<String>,
-}
-
-/// Edit an existing NELA HTML deck (append slides or apply a full replacement plan).
-#[tauri::command]
-pub async fn edit_presentation_deck(
-    request: EditPresentationDeckRequest,
-    app: AppHandle,
-) -> Result<ArtifactResult, String> {
-    emit_stage(&app, PipelineStage::WritingCode);
-
-    let out_path = if let Some(plan_value) = request.replacement_plan {
-        let plan: crate::grammar::schema::PresentationPlan =
-            serde_json::from_value(plan_value)
-                .map_err(|e| format!("Invalid replacement plan: {e}"))?;
-        crate::presentation::rewrite_deck_from_plan(
-            &request.path,
-            plan,
-            request.output_name,
-        )?
-    } else if !request.append_slides.is_empty() {
-        let html = std::fs::read_to_string(&request.path)
-            .map_err(|e| format!("Failed to read presentation: {e}"))?;
-        let existing = crate::presentation::parse_presentation_html(&html)?;
-        let insert_at = request
-            .insert_at
-            .unwrap_or(existing.slides.len())
-            .min(existing.slides.len());
-        crate::presentation::insert_slides_to_deck(
-            &request.path,
-            request.append_slides,
-            insert_at,
-            request.output_name,
-        )?
-    } else {
-        return Err("No slides to append and no replacement plan provided".to_string());
-    };
-
-    emit_stage(
-        &app,
-        PipelineStage::LivePreview {
-            path: out_path.to_string_lossy().to_string(),
-        },
-    );
-
-    Ok(ArtifactResult {
-        path: out_path.to_string_lossy().to_string(),
-        kind: "html".to_string(),
-        warning: None,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApplyPresentationOpsRequest {
-    pub path: String,
-    pub ops: Vec<crate::presentation::PresentationEditOp>,
-    #[serde(default)]
-    pub output_name: Option<String>,
-}
-
-/// Apply a surgical op list to a NELA HTML deck or native PPTX (writes a new HTML deck).
-#[tauri::command]
-pub async fn apply_presentation_ops(
-    request: ApplyPresentationOpsRequest,
-    app: AppHandle,
-) -> Result<ArtifactResult, String> {
-    emit_stage(&app, PipelineStage::WritingCode);
-
-    let out_path = crate::presentation::apply_ops_to_deck(
-        &request.path,
-        request.ops,
-        request.output_name,
-    )?;
-
-    emit_stage(
-        &app,
-        PipelineStage::LivePreview {
-            path: out_path.to_string_lossy().to_string(),
-        },
-    );
-
-    Ok(ArtifactResult {
-        path: out_path.to_string_lossy().to_string(),
-        kind: "html".to_string(),
-        warning: None,
+        formula_errors: None,
+        recalculated: None,
     })
 }
 
@@ -282,6 +265,8 @@ pub async fn generate_html(
         path: path.to_string_lossy().to_string(),
         kind: "html".to_string(),
         warning: None,
+        formula_errors: None,
+        recalculated: None,
     })
 }
 
@@ -379,10 +364,12 @@ fn parse_spreadsheet_data_inner(
         return Ok(serde_json::json!({
             "sheet_name": "CSV",
             "rows": rows,
+            "cell_fills": serde_json::Map::new(),
             "truncated": row_cap.is_some_and(|cap| data_rows >= cap),
             "sheets": [{
                 "sheet_name": "CSV",
                 "rows": rows,
+                "cell_fills": serde_json::Map::new(),
                 "truncated": row_cap.is_some_and(|cap| data_rows >= cap),
             }],
         }));
@@ -396,6 +383,8 @@ fn parse_spreadsheet_data_inner(
     if sheet_names.is_empty() {
         return Err("No sheets found in workbook".to_string());
     }
+
+    let fills_by_sheet = extract_xlsx_cell_fills(&path, row_cap);
 
     let mut sheets_out = Vec::new();
     for sheet_name in &sheet_names {
@@ -431,9 +420,15 @@ fn parse_spreadsheet_data_inner(
             data_rows += 1;
         }
 
+        let cell_fills = fills_by_sheet
+            .get(sheet_name)
+            .cloned()
+            .unwrap_or_default();
+
         sheets_out.push(serde_json::json!({
             "sheet_name": sheet_name,
             "rows": rows,
+            "cell_fills": cell_fills,
             "truncated": row_cap.is_some_and(|cap| data_rows >= cap),
         }));
     }
@@ -446,9 +441,87 @@ fn parse_spreadsheet_data_inner(
     Ok(serde_json::json!({
         "sheet_name": first.get("sheet_name").cloned().unwrap_or(serde_json::Value::String("Sheet1".into())),
         "rows": first.get("rows").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+        "cell_fills": first.get("cell_fills").cloned().unwrap_or(serde_json::json!({})),
         "truncated": first.get("truncated").cloned().unwrap_or(serde_json::Value::Bool(false)),
         "sheets": sheets_out,
     }))
+}
+
+/// Best-effort fill extraction via umya-spreadsheet. Failures yield empty maps
+/// so value parsing still succeeds.
+fn extract_xlsx_cell_fills(
+    path: &str,
+    row_cap: Option<usize>,
+) -> std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>> {
+    let mut out: std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>> =
+        std::collections::HashMap::new();
+    let lower = path.to_ascii_lowercase();
+    if !(lower.ends_with(".xlsx") || lower.ends_with(".xlsm")) {
+        return out;
+    }
+
+    let book = match umya_spreadsheet::reader::xlsx::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::debug!("umya fill extract skipped for {path}: {e}");
+            return out;
+        }
+    };
+
+    for sheet in book.get_sheet_collection() {
+        let name = sheet.get_name().to_string();
+        let mut fills = serde_json::Map::new();
+        for ((row_1based, col_1based), cell) in sheet.get_collection_to_hashmap() {
+            // Excel is 1-based; viewer keys are 0-based.
+            if *row_1based == 0 || *col_1based == 0 {
+                continue;
+            }
+            let r0 = (*row_1based as usize).saturating_sub(1);
+            let c0 = (*col_1based as usize).saturating_sub(1);
+            // Header (row 0) + up to row_cap data rows.
+            if let Some(cap) = row_cap {
+                if r0 > cap {
+                    continue;
+                }
+            }
+            let Some(hex) = style_fill_hex(cell.get_style()) else {
+                continue;
+            };
+            fills.insert(format!("{r0}:{c0}"), serde_json::Value::String(hex));
+        }
+        out.insert(name, fills);
+    }
+    out
+}
+
+fn style_fill_hex(style: &umya_spreadsheet::Style) -> Option<String> {
+    let color = style.background_color()?;
+    let argb = color.argb_str();
+    let rgb = argb_to_css_hex(&argb)?;
+    if is_default_fill(&rgb) {
+        return None;
+    }
+    Some(rgb)
+}
+
+fn argb_to_css_hex(argb: &str) -> Option<String> {
+    let s = argb.trim().trim_start_matches('#').to_ascii_uppercase();
+    let rgb = match s.len() {
+        8 => &s[2..], // AARRGGBB → RRGGBB
+        6 => s.as_str(),
+        _ => return None,
+    };
+    if !rgb.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{rgb}"))
+}
+
+fn is_default_fill(hex: &str) -> bool {
+    matches!(
+        hex.to_ascii_uppercase().as_str(),
+        "#FFFFFF" | "#000000" | "#00000000" | "#FFFFFFFF" | "#00FFFFFF"
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -511,104 +584,6 @@ pub async fn write_artifact_copy(
     std::fs::write(&out_path, contents.as_bytes())
         .map_err(|e| format!("Failed to write artifact copy: {e}"))?;
     Ok(out_path.to_string_lossy().to_string())
-}
-
-/// Apply a unified diff patch to a file, writing a **new** artifact copy.
-/// The original path is left unchanged. Returns the new file path.
-#[tauri::command]
-pub async fn apply_diff_patch(path: String, patch: String) -> Result<String, String> {
-    let original = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {e}"))?;
-
-    let patched = apply_patch(&original, &patch)?;
-
-    if patched == original {
-        return Err(
-            "Patch did not change the file — try rephrasing the edit or use a more specific instruction"
-                .to_string(),
-        );
-    }
-
-    let stem = crate::presentation::edited_output_name(&path);
-    let ext = std::path::Path::new(&path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("html");
-    let out_dir = crate::paths::artifacts_dir();
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("Create output dir: {e}"))?;
-    let out_path = crate::paths::unique_artifact_path(&out_dir, &stem, ext);
-
-    std::fs::write(&out_path, &patched)
-        .map_err(|e| format!("Failed to write patched file: {e}"))?;
-
-    Ok(out_path.to_string_lossy().to_string())
-}
-
-fn apply_patch(original: &str, patch: &str) -> Result<String, String> {
-    let mut original_lines: Vec<&str> = original.lines().collect();
-    let mut patch_lines = patch.lines().peekable();
-    let mut offset: i32 = 0;
-
-    while let Some(line) = patch_lines.next() {
-        if line.starts_with("@@ ") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() < 3 {
-                continue;
-            }
-
-            let old_range = parts[1].strip_prefix('-').unwrap_or(parts[1]);
-            let old_parts: Vec<&str> = old_range.split(',').collect();
-            let old_start = old_parts[0].parse::<usize>().map_err(|_| {
-                format!(
-                    "Invalid patch hunk header (could not parse line number in `{line}`). \
-                     Rephrase the edit, or use a slide-specific command like “change the image on slide 1”."
-                )
-            })?;
-            let old_len = if old_parts.len() > 1 {
-                old_parts[1].parse::<usize>().map_err(|_| {
-                    format!(
-                        "Invalid patch hunk header (could not parse range in `{line}`). \
-                         Rephrase the edit, or use a slide-specific command."
-                    )
-                })?
-            } else {
-                1
-            };
-
-            let mut expected_old = Vec::new();
-            let mut new_lines = Vec::new();
-
-            while let Some(&hunk_line) = patch_lines.peek() {
-                if hunk_line.starts_with("@@") || hunk_line.starts_with("diff ") {
-                    break;
-                }
-                patch_lines.next();
-
-                if hunk_line.starts_with(' ') {
-                    let content = &hunk_line[1..];
-                    expected_old.push(content);
-                    new_lines.push(content);
-                } else if hunk_line.starts_with('-') {
-                    expected_old.push(&hunk_line[1..]);
-                } else if hunk_line.starts_with('+') {
-                    new_lines.push(&hunk_line[1..]);
-                }
-            }
-
-            let start_idx = (old_start as i32 - 1 + offset) as usize;
-            if start_idx + old_len > original_lines.len() {
-                return Err(format!(
-                    "Patch range out of bounds: start={}, len={}, original={}",
-                    start_idx, old_len, original_lines.len()
-                ));
-            }
-
-            original_lines.splice(start_idx..(start_idx + old_len), new_lines.clone());
-            offset += new_lines.len() as i32 - old_len as i32;
-        }
-    }
-
-    Ok(original_lines.join("\n"))
 }
 
 fn cell_to_string(cell: &calamine::Data) -> String {

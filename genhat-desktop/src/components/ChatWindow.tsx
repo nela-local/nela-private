@@ -1167,15 +1167,6 @@ const ChatWindow: React.FC<ChatWindowProps> = memo(({
 
       {/* ── Input Area ── */}
       <div className="px-6 py-3 shrink-0 border-t border-glass-border bg-void-900">
-        {chatMode === "text" &&
-        session?.artifactPath &&
-        session?.artifactStage === "LivePreview" ? (
-          <p className="max-w-3xl mx-auto mb-2 text-[0.72rem] text-txt-muted">
-            Edits apply to the open artifact
-            {session.artifactPanelOpen ? "" : " (panel closed — still editable from here)"}
-            . Use the pencil for advanced element select.
-          </p>
-        ) : null}
         {/* RAG doc indicators */}
         {showRagControls && (
           <div className="flex items-center gap-2 mb-2 max-w-3xl mx-auto">

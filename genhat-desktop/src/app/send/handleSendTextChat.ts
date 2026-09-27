@@ -617,6 +617,19 @@ export async function handleSendTextChat(
         });
       }
 
+      // Reply was entirely leaked planner JSON / tool markup — say so instead of vanishing.
+      if (
+        !intro &&
+        !followup &&
+        !artifactPath &&
+        !body &&
+        uniqueToolArts.length === 0 &&
+        response.trim()
+      ) {
+        intro =
+          "That reply came back as internal research data instead of an answer, so I hid it. Please send your message again.";
+      }
+
       if (!intro && !followup && !artifactPath && !body && uniqueToolArts.length === 0) {
         return {
           streamingContent: "",
@@ -817,9 +830,10 @@ export async function handleSendTextChat(
       webEnabled: effectiveWebEnabled,
       fileSearchEnabled,
       computerUseEnabled: useComputerUseStore.getState().enabled,
-      includeMcpTools:
-        !privateMode &&
-        (!autoArtifacts || Boolean(tallyIntent && connectorToolsNeeded)),
+      // Always expose artifact MCP tools in cloud chat (run_xlsx_python, generate_*, …).
+      // Auto-artifact HTML streaming can coexist; stripping MCP made the model cite
+      // run_xlsx_python from the system prompt while having zero tool access.
+      includeMcpTools: !privateMode,
       chartEnabled: !privateMode,
       chartPool,
       containsFileContext: explicitAttachments,

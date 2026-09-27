@@ -10,6 +10,7 @@ import type { DeckExportFormat } from "../app/exportDeck";
 import { isPresentationPreviewHtml } from "../app/presentationPreviewSelect";
 import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
 import { readTallyLiveSelectionFromWindow } from "../app/tallyLiveSelection";
+import ExcelSheetGrid from "./ExcelSheetGrid";
 
 export interface InlineArtifactProps {
   artifactPath?: string | null;
@@ -49,7 +50,12 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
   const [exportError, setExportError] = useState<string | null>(null);
   const [isPresentationHtml, setIsPresentationHtml] = useState(false);
 
-  const [spreadsheetData, setSpreadsheetData] = useState<{ sheetName: string; rows: string[][] } | null>(null);
+  const [spreadsheetData, setSpreadsheetData] = useState<{
+    sheetName: string;
+    rows: string[][];
+    cellFills?: Record<string, string>;
+    sheets?: Array<{ name: string; rows: string[][]; cellFills?: Record<string, string> }>;
+  } | null>(null);
   const [loadingSpreadsheet, setLoadingSpreadsheet] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -280,10 +286,16 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
     if (stage === "LivePreview" && isSpreadsheet && currentPath) {
       setLoadingSpreadsheet(true);
       Api.parseSpreadsheetData(currentPath)
-        .then((res: { sheet_name: string; rows: string[][] }) => {
+        .then((res) => {
           setSpreadsheetData({
             sheetName: res.sheet_name,
             rows: res.rows,
+            cellFills: res.cell_fills,
+            sheets: (res.sheets ?? []).map((s) => ({
+              name: s.sheet_name || "Sheet1",
+              rows: s.rows ?? [],
+              cellFills: s.cell_fills,
+            })),
           });
         })
         .catch((err: unknown) => {
@@ -536,40 +548,22 @@ export default function InlineArtifact({ artifactPath, artifactStage, errorMessa
 
       {/* Spreadsheet Preview Area */}
       {isSpreadsheet && spreadsheetData && (
-        <div className="w-full border-t border-glass-border bg-void-900/60 overflow-hidden flex flex-col">
-          <div className="px-3.5 py-2 text-[0.72rem] font-semibold text-txt-secondary border-b border-glass-border flex justify-between items-center bg-void-950/20">
+        <div className="w-full border-t border-glass-border bg-void-900/60 overflow-hidden flex flex-col h-[320px]">
+          <div className="px-3.5 py-2 text-[0.72rem] font-semibold text-txt-secondary border-b border-glass-border flex justify-between items-center bg-void-950/20 shrink-0">
             <span>📊 {spreadsheetData.sheetName}</span>
-            <span className="text-[0.65rem] text-txt-muted">{spreadsheetData.rows.length} rows detected</span>
+            <span className="text-[0.65rem] text-txt-muted">
+              {spreadsheetData.rows.length} rows detected
+            </span>
           </div>
-          <div className="w-full overflow-x-auto max-h-[300px] overflow-y-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse text-[0.74rem]">
-              <thead>
-                <tr className="bg-void-950/60 border-b border-glass-border sticky top-0 backdrop-blur-md z-10">
-                  {spreadsheetData.rows[0]?.map((cell, idx) => (
-                    <th key={idx} className="p-2.5 font-semibold text-neon border-r border-glass-border last:border-r-0 whitespace-nowrap">
-                      {cell || `Column ${idx + 1}`}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {spreadsheetData.rows.slice(1, 50).map((row, rowIdx) => (
-                  <tr key={rowIdx} className="border-b border-glass-border/40 hover:bg-void-800/30 transition-colors">
-                    {row.map((cell, cellIdx) => (
-                      <td key={cellIdx} className="p-2.5 text-txt-secondary border-r border-glass-border/40 last:border-r-0 whitespace-nowrap max-w-[200px] truncate" title={cell}>
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex-1 min-h-0">
+            <ExcelSheetGrid
+              rows={spreadsheetData.rows}
+              sheetName={spreadsheetData.sheetName}
+              sheets={spreadsheetData.sheets}
+              cellFills={spreadsheetData.cellFills}
+              maxRows={50}
+            />
           </div>
-          {spreadsheetData.rows.length > 50 && (
-            <div className="px-3.5 py-1.5 bg-void-950/40 text-[0.65rem] text-txt-muted text-center border-t border-glass-border">
-              Showing the first 50 rows. Use the download option to view the full spreadsheet.
-            </div>
-          )}
         </div>
       )}
 

@@ -30,13 +30,14 @@ export function resolveCloudArtifactMode(options?: {
   useCloud?: boolean;
   intelligenceMode?: IntelligenceMode | null;
   plan?: string | null;
-  /** Spreadsheet freeform uses csv; HTML/PPT use html. */
+  /** Spreadsheet uses JSON sheets + cell_fills; HTML/PPT use html freeform. */
   kind?: "html" | "presentation" | "spreadsheet";
 }): CloudArtifactMode {
   if (!options?.useCloud) return "local";
 
-  // Cloud (including Fast): freeform streaming. Grammar/JSON plans are local-only.
-  if (options.kind === "spreadsheet") return "csv";
+  // Cloud (including Fast): freeform HTML for decks/pages; JSON plans for
+  // spreadsheets so cell_fills become real .xlsx colors (CSV cannot carry fills).
+  if (options.kind === "spreadsheet") return "json";
   return "html";
 }
 
@@ -59,6 +60,7 @@ export function isPrivateMode(): boolean {
 
 /** Tool names that create downloadable / previewable file artifacts. */
 export const ARTIFACT_CREATING_TOOLS = new Set([
+  "run_xlsx_python",
   "generate_spreadsheet",
   "generate_presentation",
   "generate_html",

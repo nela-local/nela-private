@@ -3,6 +3,8 @@
  * Splits model output into chat prose vs artifact body as tokens arrive.
  */
 
+import { stripLeakedToolPayloads } from "./send/toolCallRepair";
+
 export type NelaArtifactMime = "text/html" | "text/csv";
 
 export type StreamArtifactMeta = {
@@ -633,7 +635,7 @@ export function stripPartialArtifactTags(text: string): string {
  */
 export function scrubChatArtifactProtocol(text: string): string {
   if (!text) return "";
-  let s = text;
+  let s = stripLeakedToolPayloads(text);
 
   // Complete tagged blocks (body belongs in the side panel, not chat).
   s = s.replace(/<nela-artifact\b[^>]*>[\s\S]*?<\/nela-artifact\s*>/gi, "");

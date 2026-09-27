@@ -140,6 +140,14 @@ fn friendly_api_body_message(body: &str, status: StatusCode) -> String {
                     return "NELA Cloud is busy right now. Wait a moment, then try again."
                         .to_string();
                 }
+                "VALIDATION_ERROR" => {
+                    if let Some(message) = value.get("message").and_then(|v| v.as_str()) {
+                        let trimmed = message.trim();
+                        if !trimmed.is_empty() {
+                            return trimmed.chars().take(4000).collect();
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -606,6 +614,32 @@ pub async fn extract_web(app_data_dir: &Path, body: Value) -> Result<Value, Stri
     resp.json()
         .await
         .map_err(|_| "We got an unexpected reply from web extract. Please try again.".to_string())
+}
+
+/// POST /v1/xlsx/python — backend openpyxl sandbox + LibreOffice recalc.
+/// Body: `{ code, outputName? }`. Returns base64 workbook + formula error report.
+pub async fn run_xlsx_python(app_data_dir: &Path, body: Value) -> Result<Value, String> {
+    let resp = authorized_request(app_data_dir, |token| {
+        let body = body.clone();
+        async move {
+            // Generation + soffice can take >30s.
+            send_cloud(reqwest::Method::POST, "/v1/xlsx/python", move |req| {
+                req.bearer_auth(token.clone())
+                    .timeout(std::time::Duration::from_secs(120))
+                    .json(&body)
+            })
+            .await
+        }
+    })
+    .await?;
+
+    if !resp.status().is_success() {
+        return Err(read_error_body(resp).await);
+    }
+
+    resp.json()
+        .await
+        .map_err(|_| "We got an unexpected reply from Excel generation. Please try again.".to_string())
 }
 
 /// Non-streaming chat completion — returns raw OpenAI-style JSON string

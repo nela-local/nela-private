@@ -7,7 +7,6 @@ import {
   Code2,
   Eye,
   Pencil,
-  SendHorizontal,
   Maximize2,
   Minimize2,
 } from "lucide-react";
@@ -26,12 +25,9 @@ import { sanitizeExcelSheetName } from "../app/spreadsheetPlan";
 import { Api } from "../api";
 import { attachTallyLiveBridge } from "../app/tallyLiveBridge";
 import ExcelSheetGrid from "./ExcelSheetGrid";
-import type { PreviewEditMessage } from "./ArtifactPreviewEditChat";
-import ArtifactPreviewEditBar from "./ArtifactPreviewEditBar";
 import ArtifactPreviewFormatBar, {
   type FormatCommand,
 } from "./ArtifactPreviewFormatBar";
-import ArtifactPreviewEditLog from "./ArtifactPreviewEditLog";
 import ArtifactImagePicker from "./ArtifactImagePicker";
 import { cancelImagePicker } from "../stores/imagePickerStore";
 import { useArtifactStreamStore } from "../stores/artifactStreamStore";
@@ -61,17 +57,10 @@ export interface ArtifactSidePanelProps {
   savedPath?: string | null;
   /**
    * True only while the first generation is still streaming (no saved file yet).
-   * Must not flip on during later edits — that hid the Edit button.
+   * Must not flip on during later micro-edits — that hid the Edit button.
    */
   streamActive?: boolean;
   onClose: () => void;
-  /** Apply an edit from the in-preview chat (keeps the panel open). */
-  onPreviewEdit?: (
-    text: string,
-    artifactPath: string,
-    onStatus: (message: string, kind: "progress" | "done" | "error") => void,
-    editContext?: { activeSlideIndex?: number }
-  ) => void | Promise<void>;
 }
 
 function HtmlSourceStream({
@@ -173,10 +162,9 @@ export default function ArtifactSidePanel({
   savedPath,
   streamActive = false,
   onClose,
-  onPreviewEdit,
 }: ArtifactSidePanelProps) {
   // Only treat as "streaming generation" when there is no saved file yet.
-  // Edits briefly change artifactStage away from LivePreview — that must not hide Edit.
+  // Micro-edits briefly change artifactStage away from LivePreview — that must not hide Edit.
   const streaming = Boolean(streamActive) || !savedPath;
   const [htmlView, setHtmlView] = useState<"code" | "preview">("code");
   const [sheetView, setSheetView] = useState<"sheet" | "code">("sheet");
@@ -188,15 +176,16 @@ export default function ArtifactSidePanel({
   const [xlsxRows, setXlsxRows] = useState<string[][] | null>(null);
   const [xlsxSheetName, setXlsxSheetName] = useState("Sheet1");
   const [xlsxSheets, setXlsxSheets] = useState<
-    Array<{ name: string; rows: string[][] }> | null
+    Array<{ name: string; rows: string[][]; cellFills?: Record<string, string> }> | null
   >(null);
+  const [xlsxCellFills, setXlsxCellFills] = useState<Record<string, string> | null>(
+    null
+  );
   const [xlsxLoading, setXlsxLoading] = useState(false);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
   const [resizing, setResizing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
-  const [editDraft, setEditDraft] = useState("");
-  const [editMessages, setEditMessages] = useState<PreviewEditMessage[]>([]);
   // 0-based index of the slide currently shown inside the deck iframe
   // (reported by the deck's nav script via postMessage). Null for non-deck HTML.
   const [activeSlideIndex, setActiveSlideIndex] = useState<number | null>(null);
@@ -214,7 +203,6 @@ export default function ArtifactSidePanel({
   const latestHtml = useRef(html ?? "");
   const paintedOnce = useRef(false);
   const prevSaved = useRef(savedPath);
-  const editMsgId = useRef(0);
 
   const clampWidth = useCallback((width: number) => {
     const parentWidth =
@@ -285,11 +273,11 @@ export default function ArtifactSidePanel({
       setSheetView("sheet");
       setXlsxRows(null);
       setXlsxSheets(null);
+      setXlsxCellFills(null);
       setHydratedHtml("");
       setDisplayHtml("");
       setTallyOfflineNotice(null);
       paintedOnce.current = false;
-      setEditDraft("");
       cancelImagePicker();
     }
     if (savedPath && savedPath !== prevSaved.current) {
@@ -299,6 +287,7 @@ export default function ArtifactSidePanel({
       setTallyOfflineNotice(null);
       setXlsxRows(null);
       setXlsxSheets(null);
+      setXlsxCellFills(null);
       setActiveSlideIndex(null);
       setSelectedComponent(null);
       paintedOnce.current = false;
@@ -307,13 +296,9 @@ export default function ArtifactSidePanel({
         setHtmlView("preview");
         setSheetView("sheet");
       }
-      // New artifact path from an edit — keep edit chat, clear only when path stem changes a lot.
-      if (prevSaved.current && !editOpen) {
-        setEditMessages([]);
-      }
     }
     prevSaved.current = savedPath;
-  }, [savedPath, editOpen]);
+  }, [savedPath]);
 
   // Selection only while Edit is open.
   useEffect(() => {
@@ -402,6 +387,7 @@ export default function ArtifactSidePanel({
     if (!/\.xlsx?$/i.test(savedPath)) {
       setXlsxRows(null);
       setXlsxSheets(null);
+      setXlsxCellFills(null);
       return;
     }
     let cancelled = false;
@@ -411,9 +397,11 @@ export default function ArtifactSidePanel({
         if (cancelled) return;
         setXlsxRows(data.rows ?? []);
         setXlsxSheetName(data.sheet_name || title || "Sheet1");
+        setXlsxCellFills(data.cell_fills ?? null);
         const multi = (data.sheets ?? []).map((s) => ({
           name: s.sheet_name || "Sheet1",
           rows: s.rows ?? [],
+          cellFills: s.cell_fills,
         }));
         setXlsxSheets(multi.length > 0 ? multi : null);
       })
@@ -422,6 +410,7 @@ export default function ArtifactSidePanel({
         if (!cancelled) {
           setXlsxRows(null);
           setXlsxSheets(null);
+          setXlsxCellFills(null);
         }
       })
       .finally(() => {
@@ -504,19 +493,10 @@ export default function ArtifactSidePanel({
   // and apply in-canvas image-library clicks onto that slide.
   useEffect(() => {
     const pushLibMsg = (
-      content: string,
-      kind: PreviewEditMessage["kind"]
+      _content: string,
+      _kind: "progress" | "done" | "error"
     ) => {
-      editMsgId.current += 1;
-      setEditMessages((prev) => [
-        ...prev,
-        {
-          id: `pe-${editMsgId.current}`,
-          role: "assistant" as const,
-          content,
-          kind,
-        },
-      ]);
+      /* Preview-edit chat UI removed; keep callers compiling. */
     };
 
     const onMessage = (e: MessageEvent) => {
@@ -875,66 +855,7 @@ export default function ArtifactSidePanel({
     showHtmlChrome && streaming && htmlView === "preview" && !displayHtml
       ? "code"
       : htmlView;
-  const canEdit = Boolean(savedPath && onPreviewEdit);
-
-  const pushEditMessage = (
-    role: "user" | "assistant",
-    content: string,
-    kind?: PreviewEditMessage["kind"]
-  ) => {
-    editMsgId.current += 1;
-    setEditMessages((prev) => [
-      ...prev,
-      { id: `pe-${editMsgId.current}`, role, content, kind },
-    ]);
-  };
-
-  const handlePreviewSend = async (text: string) => {
-    if (!savedPath || !onPreviewEdit || editBusy) return;
-    pushEditMessage("user", text);
-    setEditBusy(true);
-    let lastAssistantId: string | null = null;
-    const onStatus = (message: string, kind: "progress" | "done" | "error") => {
-      const plain = message.replace(/\*\*/g, "");
-      if (lastAssistantId) {
-        setEditMessages((prev) =>
-          prev.map((m) =>
-            m.id === lastAssistantId ? { ...m, content: plain, kind } : m
-          )
-        );
-      } else {
-        editMsgId.current += 1;
-        lastAssistantId = `pe-${editMsgId.current}`;
-        setEditMessages((prev) => [
-          ...prev,
-          { id: lastAssistantId!, role: "assistant", content: plain, kind },
-        ]);
-      }
-    };
-    try {
-      await onPreviewEdit(
-        text,
-        savedPath,
-        onStatus,
-        activeSlideIndex != null ? { activeSlideIndex } : undefined
-      );
-      if (!lastAssistantId) {
-        onStatus("Edit applied.", "done");
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      onStatus(message || "Edit failed.", "error");
-    } finally {
-      setEditBusy(false);
-      if (type === "text/html") setHtmlView("preview");
-    }
-  };
-
-  const submitEditDraft = async (text: string) => {
-    if (!savedPath || !onPreviewEdit) return;
-    if (!text.trim()) return;
-    await handlePreviewSend(text);
-  };
+  const canEdit = Boolean(savedPath && type === "text/html");
 
   return (
     <aside
@@ -1100,6 +1021,7 @@ export default function ArtifactSidePanel({
                 rows={sheetRows}
                 sheetName={sheetName}
                 sheets={workbookSheets}
+                cellFills={xlsxCellFills ?? undefined}
                 streaming={streaming && !savedPath}
               />
             )
@@ -1155,122 +1077,73 @@ export default function ArtifactSidePanel({
                   }`}
                   onClick={() => {
                     if (editBusy) return;
-
-                    if (!editOpen) {
-                      setEditDraft("");
-                      setEditOpen(true);
-                      return;
-                    }
-
-                    // Open: icon = X when empty, Send when typed.
-                    const trimmed = editDraft.trim();
-                    if (!trimmed) {
-                      setEditDraft("");
-                      setEditOpen(false);
-                      return;
-                    }
-
-                    void (async () => {
-                      const t = trimmed;
-                      await submitEditDraft(t);
-                      setEditDraft("");
-                      setEditOpen(false);
-                    })();
+                    setEditOpen((open) => !open);
                   }}
-                  title="Advanced edit (select elements)"
-                  aria-label="Advanced edit (select elements)"
+                  title={
+                    editOpen
+                      ? "Exit element select"
+                      : "Advanced edit (select elements)"
+                  }
+                  aria-label={
+                    editOpen
+                      ? "Exit element select"
+                      : "Advanced edit (select elements)"
+                  }
                 >
-                  <Pencil
-                    size={20}
-                    className={!editOpen ? "block" : "hidden"}
-                  />
-                  <X
-                    size={20}
-                    className={editOpen && !editDraft.trim() ? "block" : "hidden"}
-                  />
-                  <SendHorizontal
-                    size={20}
-                    className={editOpen && editDraft.trim() ? "block" : "hidden"}
-                  />
+                  {editOpen ? <X size={20} /> : <Pencil size={20} />}
                 </button>
               ) : null}
 
-              {canEdit ? (
+              {canEdit && editOpen && selectedComponent ? (
                 <div className="absolute top-3 left-0 right-0 z-10 flex justify-center pl-16 pr-16">
                   <div className="w-full max-w-[720px] flex flex-col gap-2">
-                    <ArtifactPreviewEditBar
-                      open={editOpen}
-                      busy={editBusy}
-                      draft={editDraft}
-                      onDraftChange={(v) => setEditDraft(v)}
-                      onSubmit={(t) =>
-                        void (async () => {
-                          await submitEditDraft(t);
-                          setEditDraft("");
-                          setEditOpen(false);
-                        })()
-                      }
-                    />
-                    {editOpen && selectedComponent ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="flex justify-center">
-                          <div
-                            className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon/50 bg-void-800/95 px-3 py-1.5 text-[0.72rem] text-txt shadow-lg backdrop-blur"
-                            title={selectedComponent.selectorHint}
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex justify-center">
+                        <div
+                          className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon/50 bg-void-800/95 px-3 py-1.5 text-[0.72rem] text-txt shadow-lg backdrop-blur"
+                          title={selectedComponent.selectorHint}
+                        >
+                          <span className="shrink-0 rounded-full bg-neon/15 px-2 py-0.5 font-medium uppercase tracking-wide text-neon">
+                            {selectedComponent.role}
+                          </span>
+                          <span className="min-w-0 truncate text-txt-muted">
+                            {selectedComponent.role === "image" ||
+                            selectedComponent.hasImage
+                              ? "Pick a library image"
+                              : "Edit in preview · Ctrl+Enter to save"}
+                          </span>
+                          <span className="min-w-0 truncate text-txt-muted/80 max-w-[140px]">
+                            {selectedComponent.textPreview ||
+                              selectedComponent.tagName}
+                          </span>
+                          <span className="shrink-0 text-txt-muted/70">
+                            slide {(selectedComponent.slideIndex ?? 0) + 1}
+                          </span>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-full p-0.5 text-txt-muted hover:bg-void-600 hover:text-txt"
+                            aria-label="Clear selection"
+                            title="Clear selection"
+                            onClick={() => clearComponentSelection()}
                           >
-                            <span className="shrink-0 rounded-full bg-neon/15 px-2 py-0.5 font-medium uppercase tracking-wide text-neon">
-                              {selectedComponent.role}
-                            </span>
-                            <span className="min-w-0 truncate text-txt-muted">
-                              {selectedComponent.role === "image" ||
-                              selectedComponent.hasImage
-                                ? "Pick a library image"
-                                : "Edit in preview · Ctrl+Enter to save"}
-                            </span>
-                            <span className="min-w-0 truncate text-txt-muted/80 max-w-[140px]">
-                              {selectedComponent.textPreview ||
-                                selectedComponent.tagName}
-                            </span>
-                            <span className="shrink-0 text-txt-muted/70">
-                              slide {(selectedComponent.slideIndex ?? 0) + 1}
-                            </span>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded-full p-0.5 text-txt-muted hover:bg-void-600 hover:text-txt"
-                              aria-label="Clear selection"
-                              title="Clear selection"
-                              onClick={() => clearComponentSelection()}
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
+                            <X size={14} />
+                          </button>
                         </div>
-                        <ArtifactPreviewFormatBar
-                          visible={showFormatBar}
-                          onHold={() => postFormatHold(true)}
-                          onRelease={() => postFormatHold(false)}
-                          onCommand={postFormatCommand}
-                        />
                       </div>
-                    ) : null}
+                      <ArtifactPreviewFormatBar
+                        visible={showFormatBar}
+                        onHold={() => postFormatHold(true)}
+                        onRelease={() => postFormatHold(false)}
+                        onCommand={postFormatCommand}
+                      />
+                    </div>
                   </div>
                 </div>
               ) : null}
 
-              {canEdit && (editMessages.length > 0 || editBusy) ? (
-                <div className="absolute bottom-3 left-3 right-16 z-20 max-w-[420px] flex flex-col gap-2">
-                  <ArtifactImagePicker />
-                  <ArtifactPreviewEditLog
-                    messages={editMessages}
-                    busy={editBusy}
-                    onClear={() => setEditMessages([])}
-                  />
-                </div>
-              ) : (
-                <div className="absolute bottom-3 left-3 right-16 z-20 max-w-[420px]">
-                  <ArtifactImagePicker />
-                </div>
-              )}
+              <div className="absolute bottom-3 left-3 right-16 z-20 max-w-[420px]">
+                <ArtifactImagePicker />
+              </div>
             </div>
           ) : (
             <div className="p-4 text-sm text-txt-muted">Waiting for HTML…</div>
