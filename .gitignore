@@ -49,6 +49,7 @@ datasets/
 # Added by Spec Kitty CLI (auto-managed)
 .claude/
 .venv/
+.venv-xlsx/
 .vscode/
 .codex/
 .vibe/

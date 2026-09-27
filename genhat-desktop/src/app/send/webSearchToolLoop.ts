@@ -428,6 +428,9 @@ export async function runWebSearchToolLoop(
   let webSearchResult: WebSearchResult | null = null;
   let thinking = "";
   let payloadRepairs = 0;
+  let plannerAutoRetries = 0;
+  const userPromptText =
+    [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -480,9 +483,14 @@ export async function runWebSearchToolLoop(
           continue;
         }
         if (content && looksLikeMisplacedToolOrPlannerPayload(content)) {
-          // Never stream facet plans. Prefer host-running extracted queries.
-          const queries = extractQueriesFromFacetDump(content);
-          if (queries.length > 0 && webEnabled && round + 1 < MAX_TOOL_ROUNDS) {
+          // Never stream facet plans. Run the searches instead of asking the user to resend.
+          let queries = extractQueriesFromFacetDump(content);
+          if (queries.length === 0 && plannerAutoRetries < 1) {
+            const fromPrompt = userPromptText.replace(/\s+/g, " ").trim().slice(0, 180);
+            if (fromPrompt.length > 2) queries = [fromPrompt];
+          }
+          if (queries.length > 0 && webEnabled && plannerAutoRetries < 1) {
+            plannerAutoRetries += 1;
             opts.onToolStatus?.(
               queries.length > 1
                 ? `Searching the web (${queries.length} queries)…`
@@ -525,7 +533,7 @@ export async function runWebSearchToolLoop(
             webSearchResult = merged;
             messages = [
               ...messages,
-              { role: "assistant", content: decision.content },
+              { role: "assistant", content: "" },
               {
                 role: "user",
                 content:
@@ -533,17 +541,19 @@ export async function runWebSearchToolLoop(
                   "Do not write any JSON. Answer in prose with inline [n] citations.",
               },
             ];
-            continue;
+            if (round + 1 < MAX_TOOL_ROUNDS) continue;
+            break;
           }
-          const fallback =
-            "I hit an internal research-plan format instead of searching. Please try again.";
-          opts.onChunk(fallback);
-          return {
-            content: fallback,
-            thinking,
-            webSearchResult,
-            model: opts.modelId?.trim() || undefined,
-          };
+          messages = [
+            ...messages,
+            { role: "assistant", content: "" },
+            {
+              role: "user",
+              content:
+                "Do not write JSON. Answer the user in prose with inline [n] citations.",
+            },
+          ];
+          break;
         }
         if (content) {
           opts.onChunk(decision.content);

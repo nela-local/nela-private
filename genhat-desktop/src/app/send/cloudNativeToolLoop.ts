@@ -101,6 +101,8 @@ function isStaleModuleImportError(err: unknown): boolean {
 
 const MAX_TOOL_ROUNDS = MAX_WEB_SEARCH_TOOL_ROUNDS;
 const MAX_CHART_PREP_ROUNDS = 6;
+/** Extra rounds after research to build (and once fix) a requested workbook. */
+const MAX_WORKBOOK_BUILD_ROUNDS = 2;
 /** Local generate_html can hang on huge IPC payloads — never block the chat forever. */
 const GENERATE_HTML_TIMEOUT_MS = 90_000;
 const MAX_GENERATE_HTML_CHARS = 400_000;
@@ -1822,17 +1824,24 @@ export async function runCloudNativeToolLoop(
   let lastAnnotations: FileAnnotation[] | undefined;
   let payloadRepairs = 0;
   let csvDumpRepairs = 0;
+  /** Host-run web_search after a leaked research plan, so the turn does not stop. */
+  let plannerAutoRetries = 0;
 
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const lastUserPrompt = lastUserMsg
     ? flattenMessageContent(lastUserMsg.content as CloudChatMessage["content"])
     : "";
   const excelIntent = userAskedForSpreadsheetArtifact(lastUserPrompt);
-  const canGenerateSpreadsheet = tools.some(
+  const workbookTools = tools.filter(
     (t) =>
       t.function.name === "generate_spreadsheet" ||
       t.function.name === "run_xlsx_python"
   );
+  const canGenerateSpreadsheet = workbookTools.length > 0;
+  const hasSpreadsheetArtifact = () =>
+    artifacts.some((a) => /\.(xlsx|xlsm|csv)$/i.test(a.path));
+  const workbookStillOwed = () =>
+    excelIntent && canGenerateSpreadsheet && !hasSpreadsheetArtifact();
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -1896,9 +1905,15 @@ export async function runCloudNativeToolLoop(
           continue;
         }
 
-        // Still dumping facets after nudges — run the queries as web_search, never show JSON.
-        if (isPlannerDump && hasWebSearch && round + 1 < MAX_TOOL_ROUNDS) {
-          const queries = extractQueriesFromFacetDump(content);
+        // Leaked research plan: run the searches here (fast mode does this often).
+        // Do not stop the turn or ask the user to resend.
+        if (isPlannerDump && hasWebSearch && plannerAutoRetries < 1) {
+          plannerAutoRetries += 1;
+          let queries = extractQueriesFromFacetDump(content);
+          if (queries.length === 0) {
+            const fromPrompt = lastUserPrompt.replace(/\s+/g, " ").trim().slice(0, 180);
+            if (fromPrompt.length > 2) queries = [fromPrompt];
+          }
           if (queries.length > 0) {
             loopOpts.onToolStatus?.(
               queries.length > 1
@@ -1946,24 +1961,25 @@ export async function runCloudNativeToolLoop(
                   "Answer in prose with inline [n] citations, or call run_xlsx_python if the user asked for Excel.",
               },
             ];
-            continue;
+            if (round + 1 < MAX_TOOL_ROUNDS) continue;
+            break;
           }
         }
 
         if (isPlannerDump) {
-          // Never stream planner JSON to the chat bubble.
-          const fallback =
-            "I hit an internal research-plan format instead of searching. Please send the question again and I’ll retry with web_search.";
-          loopOpts.onChunk(fallback);
-          return {
-            content: fallback,
-            thinking,
-            webSearchResult,
-            artifacts,
-            model: lastModel,
-            creditsRemaining: lastCreditsRemaining,
-            fileAnnotations: lastAnnotations,
-          };
+          // Plan leaked again after the automatic search. Drop it and finish
+          // the turn (workbook build, then a prose reply) instead of stopping.
+          messages = [
+            ...messages,
+            { role: "assistant", content: null },
+            {
+              role: "user",
+              content: workbookStillOwed()
+                ? "Do not write JSON. Call run_xlsx_python now with the figures already gathered."
+                : "Do not write JSON. Answer the user in prose with inline [n] citations.",
+            },
+          ];
+          break;
         }
 
         // Model pasted a CSV workbook into chat instead of generate_spreadsheet.
@@ -2012,6 +2028,17 @@ export async function runCloudNativeToolLoop(
               fileAnnotations: lastAnnotations,
             };
           }
+        }
+
+        // Prose like "Now building the workbook…" with no tool call — go build it.
+        if (workbookStillOwed()) {
+          if (content) {
+            messages = [
+              ...messages,
+              { role: "assistant", content: decision.content },
+            ];
+          }
+          break;
         }
 
         if (content) {
@@ -2063,9 +2090,21 @@ export async function runCloudNativeToolLoop(
       if (round + 1 < MAX_TOOL_ROUNDS) {
         loopOpts.onToolStatus?.("Thinking…");
         const remaining = MAX_TOOL_ROUNDS - (round + 1);
+        const owed = workbookStillOwed();
         const nextHintParts: string[] = [
-          `You have ~${remaining} tool rounds left.`,
+          owed
+            ? `You have ~${remaining} research rounds left. Building the workbook with run_xlsx_python does NOT use up this budget — it is always allowed.`
+            : `You have ~${remaining} tool rounds left.`,
         ];
+        if (owed && remaining <= 2) {
+          nextHintParts.push(
+            "Stop researching now: call run_xlsx_python in your next reply using the figures gathered so far (label anything unverified)."
+          );
+        } else if (owed) {
+          nextHintParts.push(
+            "As soon as you have enough figures for the workbook, call run_xlsx_python instead of searching more."
+          );
+        }
         if (hasWebSearch) {
           nextHintParts.push(
             "If you still need more web facts, call web_search again with a NEW query and an explicit depth (snippet|full|standard|deep)."
@@ -2077,7 +2116,9 @@ export async function runCloudNativeToolLoop(
           );
         }
         nextHintParts.push(
-          "Otherwise answer in prose with inline [n] citations only (no raw URLs/paths or Sources list)."
+          owed
+            ? "Otherwise call run_xlsx_python now to build the workbook — do not end your turn with prose only."
+            : "Otherwise answer in prose with inline [n] citations only (no raw URLs/paths or Sources list)."
         );
         messages = [
           ...messages,
@@ -2087,6 +2128,87 @@ export async function runCloudNativeToolLoop(
           },
         ];
       }
+    }
+
+    // User asked for Excel but research used every round: build it with only the
+    // workbook tools attached, before the tool-less finale can end the turn.
+    const workbookOk = () =>
+      artifacts.some(
+        (a) =>
+          /\.(xlsx|xlsm|csv)$/i.test(a.path) && !(a.formulaErrors?.length)
+      );
+    for (
+      let attempt = 0;
+      attempt < MAX_WORKBOOK_BUILD_ROUNDS &&
+      excelIntent &&
+      canGenerateSpreadsheet &&
+      !workbookOk();
+      attempt++
+    ) {
+      if (attempt > 0 && !hasSpreadsheetArtifact()) break;
+      loopOpts.onToolStatus?.(
+        attempt === 0 ? "Building the workbook…" : "Fixing workbook formulas…"
+      );
+      if (attempt === 0) {
+        messages = [
+          ...messages,
+          {
+            role: "user",
+            content:
+              "Research is finished — no more searching. Build the workbook now by calling run_xlsx_python " +
+              "with the figures gathered above (label anything unverified). Do not reply with prose.",
+          },
+        ];
+      }
+      const build = await streamCloudRound(
+        messages,
+        workbookTools,
+        {
+          ...loopOpts,
+          onThinking: (t) => {
+            thinking += t;
+            loopOpts.onThinking(t);
+          },
+          onChunk: () => {},
+        },
+        "required"
+      );
+      if (build.model?.trim()) lastModel = build.model.trim();
+      if (typeof build.creditsRemaining === "number") {
+        lastCreditsRemaining = build.creditsRemaining;
+      }
+      const buildCalls = build.tool_calls ?? [];
+      if (!buildCalls.length) break;
+      messages = [
+        ...messages,
+        { role: "assistant", content: build.content || null, tool_calls: buildCalls },
+      ];
+      const batch = await executeToolCallsParallel(
+        buildCalls,
+        loopOpts,
+        webSearchResult
+      );
+      artifacts.push(...batch.artifacts);
+      messages = [
+        ...messages,
+        ...buildCalls.map((call, i) => ({
+          role: "tool" as const,
+          tool_call_id: call.id,
+          name: call.function.name,
+          content: batch.results[i]!.content,
+        })),
+      ];
+    }
+    if (excelIntent && canGenerateSpreadsheet && hasSpreadsheetArtifact()) {
+      messages = [
+        ...messages,
+        {
+          role: "user",
+          content:
+            "The workbook is saved and shown to the user as a file chip. In 2–4 sentences, summarize what it contains " +
+            "and note any figures you could not verify. Do not paste the data or write code.",
+        },
+      ];
     }
 
     // Final prose turn without tools — buffer first so facet JSON never streams live.
@@ -2141,10 +2263,9 @@ export async function runCloudNativeToolLoop(
       finaleContent &&
       looksLikeMisplacedToolOrPlannerPayload(finaleContent)
     ) {
-      // Never show planner JSON from the finale turn.
-      finaleContent =
-        "I gathered research context but almost returned an internal plan as the answer. " +
-        "Please ask again (or say “continue”) and I’ll answer in prose or call the spreadsheet tool.";
+      finaleContent = hasSpreadsheetArtifact()
+        ? "The workbook is saved. It uses the figures gathered above; anything that could not be verified is noted in the file."
+        : "";
     }
     if (finaleContent) {
       loopOpts.onChunk(finaleContent);

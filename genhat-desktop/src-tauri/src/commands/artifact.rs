@@ -100,10 +100,11 @@ pub async fn run_xlsx_python(
         .map_err(|e| format!("app_data_dir: {e}"))?;
 
     // Prefer backend pipeline (generation + LibreOffice verify gate).
-    let cloud_body = serde_json::json!({
-        "code": code,
-        "outputName": output_name,
-    });
+    // Omit outputName when unset — the API rejects JSON null for that field.
+    let mut cloud_body = serde_json::json!({ "code": code });
+    if let Some(name) = output_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        cloud_body["outputName"] = serde_json::Value::String(name.to_string());
+    }
     let cloud_result = crate::cloud::client::run_xlsx_python(&app_data_dir, cloud_body).await;
 
     let result = match cloud_result {
