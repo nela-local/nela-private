@@ -314,7 +314,7 @@ export function repairMisalignedRow(
 ): string[] {
   const width = headers.length;
   if (width <= 0) return row;
-  let cells = [...row];
+  const cells = [...row];
   let guard = 0;
   while (cells.length > width && guard++ < 64) {
     let merged = false;
@@ -721,7 +721,7 @@ export function normalizeSpreadsheetPlan(
       let cleanRows = asStringMatrix(raw.rows ?? raw.source_rows);
       let cell_fills = sanitizeCellFills(raw.cell_fills ?? raw.cellFills);
       let cell_fonts = sanitizeCellFonts(raw.cell_fonts ?? raw.cellFonts);
-      let ops: SpreadsheetOp[] = Array.isArray(raw.ops)
+      const ops: SpreadsheetOp[] = Array.isArray(raw.ops)
         ? raw.ops
             .map((op) =>
               op && typeof op === "object"

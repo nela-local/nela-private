@@ -96,7 +96,7 @@ export function looksLikeTruncatedFacetPlannerText(text: string): boolean {
   const hasQuery = /"query"\s*:/i.test(t);
   const hasProfile = /"profile"\s*:\s*"(?:news|research|simple)"/i.test(t);
   if (hasFacetsKey && hasQuery) return true;
-  if (hasQuery && hasProfile && /[{}\[\]]/.test(t)) return true;
+  if (hasQuery && hasProfile && /[{}[\]]/.test(t)) return true;
   // Trailing fragment of a facet object (common stream truncation).
   if (/","profile"\s*:\s*"(?:news|research|simple)"\s*\}/.test(t)) {
     return true;

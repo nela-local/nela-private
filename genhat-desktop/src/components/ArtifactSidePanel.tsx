@@ -493,10 +493,12 @@ export default function ArtifactSidePanel({
   // and apply in-canvas image-library clicks onto that slide.
   useEffect(() => {
     const pushLibMsg = (
-      _content: string,
-      _kind: "progress" | "done" | "error"
+      content: string,
+      kind: "progress" | "done" | "error"
     ) => {
-      /* Preview-edit chat UI removed; keep callers compiling. */
+      // Preview-edit chat UI was removed; callers still report progress.
+      void content;
+      void kind;
     };
 
     const onMessage = (e: MessageEvent) => {
